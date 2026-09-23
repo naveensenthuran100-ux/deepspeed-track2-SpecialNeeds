@@ -1,6 +1,7 @@
 {
   "a_accel_max": 6.0,
   "a_brake_max": 5.0,
+  "a_coast": 1.5,
   "a_lat_max": 6.0,
   "length": 0.5,
   "mass": 3.906,

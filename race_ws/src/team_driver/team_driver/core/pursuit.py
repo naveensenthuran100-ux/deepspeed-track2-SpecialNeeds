@@ -38,19 +38,26 @@ class PurePursuit:
             the standard refinement: a fixed one is either twitchy when fast
             or lazy when slow.
         min_lookahead / max_lookahead: bounds, in metres.
+        curvature_cap: cap the lookahead at this fraction of the local turn
+            radius. Pure pursuit aiming further ahead than the corner radius
+            tracks a chord across the corner rather than round it, and this
+            circuit turns at about 1.1 m while the speed-scaled lookahead
+            reaches 2.2 m.
     """
 
     def __init__(
         self,
         vehicle: Vehicle,
         k_lookahead: float = 0.35,
-        min_lookahead: float = 0.6,
-        max_lookahead: float = 3.0,
+        min_lookahead: float = 0.45,
+        max_lookahead: float = 2.0,
+        curvature_cap: float = 0.8,
     ):
         self.vehicle = vehicle
         self.k_lookahead = float(k_lookahead)
         self.min_lookahead = float(min_lookahead)
         self.max_lookahead = float(max_lookahead)
+        self.curvature_cap = float(curvature_cap)
 
     def lookahead_for(self, speed: float) -> float:
         speed = float(speed) if math.isfinite(float(speed)) else 0.0
@@ -58,11 +65,17 @@ class PurePursuit:
         return min(max(distance, self.min_lookahead), self.max_lookahead)
 
     def step(self, pose_xy, yaw: float, speed: float, path: Centreline) -> PursuitResult:
-        lookahead = self.lookahead_for(speed)
-
-        # Walk forward along the path by one lookahead from whatever sample we
-        # are closest to. point_at_s wraps, so a lap has no seam.
         index, _ = path.nearest(pose_xy)
+
+        # Speed sets the lookahead; the corner we are in caps it.
+        lookahead = self.lookahead_for(speed)
+        kappa = abs(float(path.curvature[index]))
+        if kappa > _EPS:
+            lookahead = min(lookahead, self.curvature_cap / kappa)
+        lookahead = max(lookahead, self.min_lookahead)
+
+        # Walk forward along the path by one lookahead. point_at_s wraps, so
+        # a lap has no seam.
         target = path.point_at_s(path.s[index] + lookahead)
 
         dx = float(target[0]) - float(pose_xy[0])

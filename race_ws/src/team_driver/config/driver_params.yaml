@@ -73,5 +73,7 @@ driver:
       # nowhere.
       lift_band: 0.5
 
-      # Throttle per m/s of excess once past the lift band.
-      brake_gain: 0.30
+      # Throttle per m/s of excess once past the lift band. The speed
+      # profile plans braking at a_brake_max, so this must be high enough
+      # that the controller can actually ask for it.
+      brake_gain: 1.0

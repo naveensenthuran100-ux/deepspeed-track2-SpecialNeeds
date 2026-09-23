@@ -86,3 +86,22 @@ def test_output_is_always_bounded_and_finite():
         )
         assert np.isfinite(throttle)
         assert -1.0 <= throttle <= 1.0
+
+
+def test_brake_command_can_reach_full_authority():
+    """The profile plans its braking at a_brake_max, so the controller has to
+    be able to ask for a_brake_max. It could not: a proportional law at
+    0.3 throttle per m/s of excess capped real deceleration at about a third
+    of what the profile assumed, so the car arrived at every corner too fast
+    and ran wide. Caught by the first surrogate lap.
+    """
+    controller = SpeedController(Vehicle.default())
+    assert controller.step(2.0, 4.0, 0.025) <= -0.9
+
+
+def test_braking_is_proportional_before_it_saturates():
+    controller = SpeedController(Vehicle.default())
+    mild = controller.step(3.0, 3.8, 0.025)
+    controller.reset()
+    hard = controller.step(3.0, 5.5, 0.025)
+    assert hard < mild <= 0.0

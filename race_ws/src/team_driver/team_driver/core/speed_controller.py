@@ -34,7 +34,11 @@ class SpeedController:
             units per (m/s) and per (m/s * s) respectively.
         integral_limit: hard clamp on the integral term, in throttle units.
         lift_band: how far over the target we coast before we brake, in m/s.
-        brake_gain: throttle per m/s of excess once past the lift band.
+        brake_gain: throttle per m/s of excess once past the lift band. The
+            speed profile plans its braking at `a_brake_max`, so this has to
+            be high enough that the controller can actually ask for
+            `a_brake_max` - at 0.3 it never asked for more than a third of
+            it, and the car arrived at every corner too fast.
     """
 
     def __init__(
@@ -44,7 +48,7 @@ class SpeedController:
         ki: float = 0.15,
         integral_limit: float = 0.30,
         lift_band: float = 0.5,
-        brake_gain: float = 0.30,
+        brake_gain: float = 1.0,
     ):
         self.vehicle = vehicle
         self.kp = float(kp)

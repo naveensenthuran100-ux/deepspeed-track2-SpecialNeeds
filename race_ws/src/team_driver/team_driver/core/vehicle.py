@@ -64,6 +64,7 @@ class Vehicle:
     a_lat_max: float = 6.0      # m/s^2, cornering grip
     a_accel_max: float = 6.0    # m/s^2, traction-limited acceleration
     a_brake_max: float = 5.0    # m/s^2, deceleration we are willing to ask for
+    a_coast: float = 1.5        # m/s^2, deceleration with the throttle simply lifted
     v_max: float = TOP_SPEED_MPS
 
     measured: bool = False

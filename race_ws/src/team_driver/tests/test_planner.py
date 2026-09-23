@@ -193,3 +193,37 @@ def test_load_path_rejects_a_mismatched_profile():
     planner = Planner(Vehicle.default(), PlannerConfig())
     with pytest.raises(ValueError):
         planner.load_path(STRAIGHT, np.zeros(7))
+
+
+# ===========================================================================
+# Regressions from the first surrogate lap.
+# ===========================================================================
+
+def _arc_path(radius=1.2, count=400):
+    t = np.linspace(0.0, 2 * np.pi, count, endpoint=False)
+    return Centreline(np.stack([radius * np.cos(t), radius * np.sin(t)], axis=1))
+
+
+def _planner_on(path, **kwargs):
+    planner = Planner(Vehicle.default(), PlannerConfig(**kwargs))
+    planner.load_path(path, np.full(len(path.xy), 4.0))
+    return planner
+
+
+def test_an_obstacle_sitting_on_the_path_is_still_blocked():
+    """The check has to keep working once it stops using line-of-sight."""
+    path = _arc_path()
+    planner = _planner_on(path, block_enter_frames=1)
+    pose = tuple(path.xy[0])
+    yaw = float(np.arctan2(path.tangent[0][1], path.tangent[0][0]))
+
+    # A wall of returns landing right on the path a metre or so ahead.
+    ahead = path.point_at_s(path.s[0] + 1.5)
+    bearing = np.arctan2(ahead[1] - pose[1], ahead[0] - pose[0]) - yaw
+    scan = np.full(201, 10.0)
+    scan[np.abs(np.arctan2(np.sin(ANGLES - bearing), np.cos(ANGLES - bearing))) < 0.25] = (
+        float(np.hypot(ahead[0] - pose[0], ahead[1] - pose[1]))
+    )
+    for _ in range(3):
+        result = planner.step(scan, ANGLES, pose=pose, yaw=yaw, speed=3.0, dt=0.025)
+    assert result.mode == "gap"

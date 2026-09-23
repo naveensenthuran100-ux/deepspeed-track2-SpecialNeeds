@@ -67,9 +67,11 @@ class PlannerConfig:
     #: braking distance at the current speed.
     block_min_horizon: float = 1.5
     block_samples: int = 8
-    #: A scan return this much nearer than the path point behind it counts as
-    #: something in the way.
-    block_margin: float = 0.4
+    #: A LiDAR return within this distance of the path ahead counts as
+    #: something in the way. Must stay well under the corridor half-width
+    #: (about 0.67 m at the tightest point) or the boundary itself reads as
+    #: an obstruction.
+    block_radius: float = 0.30
 
     #: Hysteresis, in frames at 40 Hz. Roughly 75 ms in, 250 ms out - quick to
     #: duck, slow to commit back.
@@ -206,11 +208,19 @@ class Planner:
             self.mode = LINE
 
     def _path_blocked(self, scan, angles, pose_xy, heading, index, speed) -> bool:
-        """Is anything sitting between us and the path we intend to drive?
+        """Is anything sitting ON the path we intend to drive?
 
-        Samples the path ahead as far as we would need to stop from here, maps
-        each sample into the scan, and asks whether the LiDAR sees something
-        nearer than the path point in that direction.
+        Asks whether any LiDAR return lands within `block_radius` of a path
+        sample ahead.
+
+        Deliberately NOT a line-of-sight test. An occlusion test - "can I see
+        the path point?" - looks equivalent and is not: on corners of about a
+        metre radius, the straight chord from the car to a point one braking
+        distance ahead leaves the corridor by geometry, so the wall on the
+        outside of the corner occludes it. That reports a blockage at every
+        corner entry on a completely clear track, which is where the speed
+        profile is worth the most. It cost 26 seconds a lap before the
+        surrogate caught it.
         """
         cfg = self.config
         braking = (speed * speed) / (2.0 * max(self.vehicle.a_brake_max, 1e-6))
@@ -222,28 +232,18 @@ class Planner:
         offsets = np.linspace(0.5, horizon, max(int(cfg.block_samples), 1))
         points = np.array([self.path.point_at_s(self.path.s[index] + d) for d in offsets])
 
-        dx = points[:, 0] - pose_xy[0]
-        dy = points[:, 1] - pose_xy[1]
-        cos_h, sin_h = math.cos(heading), math.sin(heading)
-        local_x = cos_h * dx + sin_h * dy
-        local_y = -sin_h * dx + cos_h * dy
-
-        distance = np.hypot(local_x, local_y)
-        bearing = np.arctan2(local_y, local_x)
-
-        # Only points the LiDAR can actually see tell us anything.
-        visible = (
-            (local_x > 0.0)
-            & (bearing >= angles[0])
-            & (bearing <= angles[-1])
-            & (distance < cfg.gap.max_range)
-        )
-        if not np.any(visible):
+        # A beam sitting at max range saw nothing, so it is not an obstacle.
+        hits = scan < cfg.gap.max_range - 1e-3
+        if not np.any(hits):
             return False
 
-        beams = np.searchsorted(angles, bearing[visible])
-        beams = np.clip(beams, 0, len(angles) - 1)
-        return bool(np.any(scan[beams] < distance[visible] - cfg.block_margin))
+        bearings = angles[hits] + heading
+        obstacle_x = pose_xy[0] + scan[hits] * np.cos(bearings)
+        obstacle_y = pose_xy[1] + scan[hits] * np.sin(bearings)
+
+        dx = points[:, 0][:, None] - obstacle_x[None, :]
+        dy = points[:, 1][:, None] - obstacle_y[None, :]
+        return bool(np.any(dx * dx + dy * dy < cfg.block_radius ** 2))
 
 
 # -- helpers ----------------------------------------------------------------

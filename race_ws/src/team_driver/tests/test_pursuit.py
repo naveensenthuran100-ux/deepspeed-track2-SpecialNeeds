@@ -97,3 +97,32 @@ def test_outputs_are_finite_from_anywhere_on_the_map():
         )
         assert np.isfinite(result.steer_rad)
         assert np.all(np.isfinite(result.target_xy))
+
+
+def test_lookahead_is_capped_by_the_local_corner_radius():
+    """A lookahead longer than the corner radius cuts the apex.
+
+    This circuit turns at about 1.1 m radius while the speed-scaled lookahead
+    reaches 2.2 m at racing speed, so the target point sat most of the way
+    round the corner and the car tracked a chord through the boundary. It was
+    worth 1.2 m of cross-track error, which on a 0.9 m half-width corridor is
+    a collision.
+    """
+    pursuit = PurePursuit(Vehicle.default(), k_lookahead=0.35,
+                          min_lookahead=0.45, max_lookahead=3.0)
+    tight = _circle(radius=1.0)
+    result = pursuit.step((1.0, 0.0), np.pi / 2, 6.0, tight)
+    assert result.lookahead < 1.5
+
+
+def test_lookahead_is_not_capped_on_a_straight():
+    pursuit = PurePursuit(Vehicle.default(), k_lookahead=0.35,
+                          min_lookahead=0.45, max_lookahead=3.0)
+    result = pursuit.step((0.0, 0.0), 0.0, 6.0, _straight())
+    assert result.lookahead > 2.0
+
+
+def test_lookahead_never_falls_below_its_floor():
+    pursuit = PurePursuit(Vehicle.default(), min_lookahead=0.45)
+    result = pursuit.step((0.3, 0.0), np.pi / 2, 6.0, _circle(radius=0.3))
+    assert result.lookahead >= 0.45

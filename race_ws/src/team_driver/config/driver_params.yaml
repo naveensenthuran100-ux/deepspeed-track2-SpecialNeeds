@@ -1,25 +1,77 @@
-# Your tuning lives here. Loaded with:
+# Every tunable the driver has. Loaded with:
 #   ros2 run team_driver driver --ros-args --params-file \
 #       /hackathon/race_ws/src/team_driver/config/driver_params.yaml
 #
-# or in an evaluation run:
-#   ros2 launch roboracer_referee evaluate.launch.py team:=my_team \
-#       driver_params:=/hackathon/race_ws/src/team_driver/config/driver_params.yaml
+# or in a scored run:
+#   ./scripts/evaluate.sh --team my_team --driver-params <path to a copy of this>
 #
-# Keeping the numbers out of the code means you can sweep them without
-# rebuilding, which is the fastest way to find lap time early on. Declare a
-# parameter in driver.py and it can be set here.
-#
-# The two below are all the template needs, because the template does not
-# drive (see driver.py). Expect to replace them entirely.
+# Nothing here requires a rebuild, which is the whole point: lab/sweep.py
+# writes variants of this file and evaluate.sh takes them directly. If you
+# find yourself editing code to try a number, the number belongs here.
 
 driver:
   ros__parameters:
-    # AutoDRIVE takes a normalised throttle in [-1, 1], not a target speed.
-    # This one is open loop: the car goes as fast as 0.12 throttle takes it,
-    # which is different on the straight and up against the limit in a corner.
-    # Turning a target speed into a throttle is a control problem you own -
-    # see docs/04-algorithms.md §4.1.
-    crawl_throttle: 0.12
 
-    max_range: 10.0           # [m] clip the scan here; the LiDAR reaches 10 m
+    vehicle_ns: "/autodrive/roboracer_1"
+
+    # Path to the identified vehicle parameters. Blank means the copy
+    # installed with the package. Until tools/sysid_drive.py has run, that
+    # file has measured=false and its limits are assumed, not measured - the
+    # node warns about it on startup.
+    vehicle_config: ""
+
+    gap:
+      # Clip the scan here. The LiDAR reaches 10 m.
+      max_range: 10.0
+
+      # Half the car's width (0.135 m) plus margin, used by disparity
+      # extension. THE most sensitive number in this file. The corridor
+      # narrows to about 0.90 m for a 0.27 m car, so the margin you add and
+      # the bubble radius below interact: too generous and every gap the car
+      # could have driven through gets closed off, leaving it crawling into
+      # things slowly; too tight and it clips ducts. There is a real optimum
+      # and the only way to find it is to run it.
+      car_half_width: 0.20
+
+      # The near/far step, in metres, that counts as a disparity.
+      disparity_threshold: 0.3
+
+      # Radius of the blanked arc around the closest return.
+      bubble_radius: 0.35
+
+      # A beam counts as open at this fraction of the deepest reading left
+      # after preprocessing.
+      gap_threshold_frac: 0.55
+
+      # Half-angle of the cone used to measure clearance straight ahead.
+      forward_cone_rad: 0.26
+
+      # Clearance we insist on still having in hand when stopped, in metres.
+      stop_margin: 0.35
+
+      # Speed floor. A car that stops for 15 simulated seconds is a DNF, so
+      # this never goes to zero.
+      v_min: 0.5
+
+      # Speed ceiling asked of the controller.
+      v_max: 6.0
+
+      # How much of v_max a full-lock steering angle gives up.
+      steer_speed_gain: 0.7
+
+    speed:
+      # Feed-forward does most of the work; these only trim it.
+      kp: 0.05
+      ki: 0.15
+
+      # Hard clamp on the integral, in throttle units. One slow corner is
+      # otherwise enough to hold the throttle open down the next straight.
+      integral_limit: 0.30
+
+      # How far over target we coast before braking, in m/s. The car has no
+      # ABS: a negative throttle locks the wheels and a locked wheel steers
+      # nowhere.
+      lift_band: 0.5
+
+      # Throttle per m/s of excess once past the lift band.
+      brake_gain: 0.30

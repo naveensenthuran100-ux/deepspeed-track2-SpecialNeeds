@@ -6,10 +6,18 @@ makes it testable in milliseconds rather than in six-minute simulator runs.
 
 Modes
 -----
-`gap`   reactive, needs nothing but the scan. The permanent fallback.
-`line`  follows the optimised racing line against ground-truth pose, with a
-        speed profile that brakes for a corner before it can see it. Added in
-        a later task; `gap` is what ships until then.
+`line`  Follows the optimised racing line against ground-truth pose, at the
+        speed the offline profile computed for this point. This is where the
+        lap time is: the profile knows about a corner the 10 m LiDAR cannot
+        see yet, so the car brakes before it rather than in it.
+`gap`   Reactive, needs nothing but the scan. Used whenever the line cannot
+        be trusted: no pose, an implausible pose, a pose too far off the
+        path, or something sitting on the path ahead.
+
+The switch is hysteretic. A path follower follows its line and nothing else,
+so it must give way when the line is blocked - but a mode that flips every
+frame steers worse than either mode alone, which on a 0.9 m corridor is a
+collision.
 
 The contract the adapter relies on, and the tests enforce: `step` always
 returns finite commands inside [-1, 1], whatever the scan, the pose or the
@@ -24,20 +32,49 @@ from typing import Optional, Tuple
 import numpy as np
 
 from .gap import GapConfig, GapFollower
+from .lidar import clean
+from .pursuit import PurePursuit
 from .speed_controller import SpeedController
+from .track import Centreline
 from .vehicle import Vehicle
+
+LINE = "line"
+GAP = "gap"
 
 
 @dataclass
 class PlannerConfig:
     gap: GapConfig = field(default_factory=GapConfig)
-    # Speed controller gains, exposed here so a sweep can reach them through
-    # one ROS parameter file without touching code.
+
+    # Speed controller.
     kp: float = 0.05
     ki: float = 0.15
     integral_limit: float = 0.30
     lift_band: float = 0.5
     brake_gain: float = 0.30
+
+    # Pure pursuit.
+    k_lookahead: float = 0.35
+    min_lookahead: float = 0.6
+    max_lookahead: float = 3.0
+
+    #: Give up on the line if we are further than this from it, in metres.
+    #: Either the pose is wrong or we have already left the track; in both
+    #: cases the scan is the only thing worth believing.
+    max_path_offset: float = 1.2
+
+    #: How far along the path to check for obstructions, as a floor on the
+    #: braking distance at the current speed.
+    block_min_horizon: float = 1.5
+    block_samples: int = 8
+    #: A scan return this much nearer than the path point behind it counts as
+    #: something in the way.
+    block_margin: float = 0.4
+
+    #: Hysteresis, in frames at 40 Hz. Roughly 75 ms in, 250 ms out - quick to
+    #: duck, slow to commit back.
+    block_enter_frames: int = 3
+    block_exit_frames: int = 10
 
 
 @dataclass
@@ -52,7 +89,14 @@ class Planner:
     def __init__(self, vehicle: Vehicle, config: Optional[PlannerConfig] = None):
         self.vehicle = vehicle
         self.config = config or PlannerConfig()
+
         self.gap_follower = GapFollower(vehicle, self.config.gap)
+        self.pursuit = PurePursuit(
+            vehicle,
+            k_lookahead=self.config.k_lookahead,
+            min_lookahead=self.config.min_lookahead,
+            max_lookahead=self.config.max_lookahead,
+        )
         self.speed_controller = SpeedController(
             vehicle,
             kp=self.config.kp,
@@ -62,30 +106,147 @@ class Planner:
             brake_gain=self.config.brake_gain,
         )
 
+        self.path: Optional[Centreline] = None
+        self.profile: Optional[np.ndarray] = None
+
+        self.mode = GAP
+        self._blocked_frames = 0
+        self._clear_frames = 0
+
+    # -- setup -----------------------------------------------------------
+
+    def load_path(self, path: Centreline, profile) -> None:
+        """Install the racing line and its speed profile.
+
+        Validated rather than trusted: a profile of the wrong length would
+        silently index the wrong corner, which is a collision at the first
+        place the two disagree.
+        """
+        profile = np.asarray(profile, dtype=np.float64)
+        if profile.shape[0] != len(path.xy):
+            raise ValueError(
+                f"profile has {profile.shape[0]} samples, path has {len(path.xy)}"
+            )
+        self.path = path
+        self.profile = profile
+        # Acquire the line immediately. The hysteresis below governs recovery
+        # after a block, not first acquisition - the blocked check runs on
+        # frame one, so waiting out block_exit_frames here would just give
+        # away a quarter of a second of every run for nothing.
+        self.mode = LINE
+        self._blocked_frames = self._clear_frames = 0
+
     def reset(self) -> None:
         self.speed_controller.reset()
+        self.mode = LINE if self.path is not None else GAP
+        self._blocked_frames = 0
+        self._clear_frames = 0
+
+    # -- the control step ------------------------------------------------
 
     def step(self, ranges, angles, pose, yaw, speed, dt) -> PlanResult:
         speed = _finite(speed, 0.0)
         dt = _finite(dt, 0.0)
+        angles = np.asarray(angles, dtype=np.float64)
+        scan = clean(ranges, self.config.gap.max_range)
 
-        # A pose we cannot trust is worse than no pose: it puts the car on a
-        # line it is not actually on. Gap mode needs neither.
-        _ = _valid_pose(pose, yaw)
+        pose_yaw = _valid_pose(pose, yaw)
+        steer_rad, v_target, mode = self._decide(scan, angles, pose_yaw, speed)
 
-        result = self.gap_follower.step(ranges, angles)
-        mode = "gap"
-
-        steer_norm = self.vehicle.steer_to_norm(result.steer_rad)
-        throttle = self.speed_controller.step(result.v_target, speed, dt)
-
+        throttle = self.speed_controller.step(v_target, speed, dt)
         return PlanResult(
-            steer_norm=_clip_unit(steer_norm),
+            steer_norm=_clip_unit(self.vehicle.steer_to_norm(steer_rad)),
             throttle=_clip_unit(throttle),
             mode=mode,
-            v_target=max(0.0, _finite(result.v_target, 0.0)),
+            v_target=max(0.0, _finite(v_target, 0.0)),
         )
 
+    def _decide(self, scan, angles, pose_yaw, speed):
+        if self.path is None or self.profile is None or pose_yaw is None:
+            return self._gap(scan, angles)
+
+        x, y, heading = pose_yaw
+        index, offset = self.path.nearest((x, y))
+        if offset > self.config.max_path_offset:
+            # Not where we think we are, or no longer on the track. Either
+            # way the line is not information any more.
+            self._blocked_frames = self._clear_frames = 0
+            self.mode = GAP
+            return self._gap(scan, angles)
+
+        self._update_mode(self._path_blocked(scan, angles, (x, y), heading, index, speed))
+
+        if self.mode == GAP:
+            return self._gap(scan, angles)
+
+        result = self.pursuit.step((x, y), heading, speed, self.path)
+        # The profile's backward pass already guarantees this speed is slow
+        # enough to make whatever is coming, so it is read at our own
+        # position rather than at the lookahead point - braking for the
+        # lookahead too would be braking twice for the same corner.
+        return float(result.steer_rad), float(self.profile[index]), LINE
+
+    def _gap(self, scan, angles):
+        result = self.gap_follower.step(scan, angles)
+        return float(result.steer_rad), float(result.v_target), GAP
+
+    # -- is the line usable right now? -----------------------------------
+
+    def _update_mode(self, blocked: bool) -> None:
+        if blocked:
+            self._blocked_frames += 1
+            self._clear_frames = 0
+        else:
+            self._clear_frames += 1
+            self._blocked_frames = 0
+
+        if self.mode == LINE and self._blocked_frames >= self.config.block_enter_frames:
+            self.mode = GAP
+        elif self.mode == GAP and self._clear_frames >= self.config.block_exit_frames:
+            self.mode = LINE
+
+    def _path_blocked(self, scan, angles, pose_xy, heading, index, speed) -> bool:
+        """Is anything sitting between us and the path we intend to drive?
+
+        Samples the path ahead as far as we would need to stop from here, maps
+        each sample into the scan, and asks whether the LiDAR sees something
+        nearer than the path point in that direction.
+        """
+        cfg = self.config
+        braking = (speed * speed) / (2.0 * max(self.vehicle.a_brake_max, 1e-6))
+        horizon = min(
+            max(braking + cfg.block_min_horizon, cfg.block_min_horizon),
+            cfg.gap.max_range,
+        )
+
+        offsets = np.linspace(0.5, horizon, max(int(cfg.block_samples), 1))
+        points = np.array([self.path.point_at_s(self.path.s[index] + d) for d in offsets])
+
+        dx = points[:, 0] - pose_xy[0]
+        dy = points[:, 1] - pose_xy[1]
+        cos_h, sin_h = math.cos(heading), math.sin(heading)
+        local_x = cos_h * dx + sin_h * dy
+        local_y = -sin_h * dx + cos_h * dy
+
+        distance = np.hypot(local_x, local_y)
+        bearing = np.arctan2(local_y, local_x)
+
+        # Only points the LiDAR can actually see tell us anything.
+        visible = (
+            (local_x > 0.0)
+            & (bearing >= angles[0])
+            & (bearing <= angles[-1])
+            & (distance < cfg.gap.max_range)
+        )
+        if not np.any(visible):
+            return False
+
+        beams = np.searchsorted(angles, bearing[visible])
+        beams = np.clip(beams, 0, len(angles) - 1)
+        return bool(np.any(scan[beams] < distance[visible] - cfg.block_margin))
+
+
+# -- helpers ----------------------------------------------------------------
 
 def _valid_pose(pose, yaw) -> Optional[Tuple[float, float, float]]:
     """(x, y, yaw) when all three are usable, otherwise None."""

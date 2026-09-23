@@ -83,3 +83,113 @@ def test_result_carries_the_target_speed_for_debugging():
     result = _planner().step(OPEN_SCAN, ANGLES, pose=None, yaw=None, speed=1.0, dt=0.025)
     assert isinstance(result, PlanResult)
     assert result.v_target >= 0.0
+
+
+# ===========================================================================
+# Line mode, and the switch back to gap. Task 9.
+# ===========================================================================
+
+from team_driver.core.profile import speed_profile
+from team_driver.core.track import Centreline
+
+STRAIGHT = Centreline(np.stack([np.linspace(0.0, 60.0, 300), np.zeros(300)], axis=1))
+CLEAR = np.full(201, 10.0)
+
+
+def _line_planner(**kwargs):
+    planner = Planner(Vehicle.default(), PlannerConfig(**kwargs))
+    profile = speed_profile(
+        STRAIGHT.curvature, STRAIGHT.s, Vehicle.default(), 1.0, v_max=5.0,
+        total_length=STRAIGHT.length,
+    )
+    planner.load_path(STRAIGHT, profile)
+    return planner
+
+
+def _blocked_scan():
+    """Something solid 1 m ahead, right where the path goes."""
+    scan = np.full(201, 10.0)
+    scan[np.abs(ANGLES) < 0.35] = 1.0
+    return scan
+
+
+def test_uses_line_mode_when_path_and_pose_present():
+    result = _line_planner().step(
+        CLEAR, ANGLES, pose=(10.0, 0.0), yaw=0.0, speed=3.0, dt=0.025
+    )
+    assert result.mode == "line"
+
+
+def test_line_mode_target_speed_comes_from_the_profile():
+    planner = _line_planner()
+    result = planner.step(CLEAR, ANGLES, pose=(10.0, 0.0), yaw=0.0, speed=3.0, dt=0.025)
+    assert abs(result.v_target - 5.0) < 0.5      # straight path, v_max 5.0
+
+
+def test_far_from_the_path_falls_back_to_gap():
+    result = _line_planner(max_path_offset=1.0).step(
+        CLEAR, ANGLES, pose=(10.0, 8.0), yaw=0.0, speed=3.0, dt=0.025
+    )
+    assert result.mode == "gap"
+
+
+def test_blocked_path_switches_to_gap():
+    planner = _line_planner(block_enter_frames=2)
+    for _ in range(5):
+        result = planner.step(
+            _blocked_scan(), ANGLES, pose=(10.0, 0.0), yaw=0.0, speed=3.0, dt=0.025
+        )
+    assert result.mode == "gap"
+
+
+def test_a_single_blocked_frame_does_not_switch():
+    planner = _line_planner(block_enter_frames=3)
+    planner.step(CLEAR, ANGLES, pose=(10.0, 0.0), yaw=0.0, speed=3.0, dt=0.025)
+    result = planner.step(
+        _blocked_scan(), ANGLES, pose=(10.0, 0.0), yaw=0.0, speed=3.0, dt=0.025
+    )
+    assert result.mode == "line"
+
+
+def test_returns_to_the_line_once_clear_again():
+    planner = _line_planner(block_enter_frames=1, block_exit_frames=2)
+    for _ in range(3):
+        planner.step(_blocked_scan(), ANGLES, pose=(10.0, 0.0), yaw=0.0, speed=3.0, dt=0.025)
+    for _ in range(5):
+        result = planner.step(CLEAR, ANGLES, pose=(10.0, 0.0), yaw=0.0, speed=3.0, dt=0.025)
+    assert result.mode == "line"
+
+
+def test_mode_switch_does_not_chatter():
+    """Alternating blocked/clear frames must not flip mode every frame."""
+    planner = _line_planner(block_enter_frames=3, block_exit_frames=3)
+    modes = []
+    for i in range(20):
+        scan = _blocked_scan() if i % 2 else CLEAR
+        modes.append(
+            planner.step(scan, ANGLES, pose=(10.0, 0.0), yaw=0.0, speed=3.0, dt=0.025).mode
+        )
+    switches = sum(1 for a, b in zip(modes, modes[1:]) if a != b)
+    assert switches <= 1
+
+
+def test_line_mode_still_clips_its_outputs():
+    rng = np.random.RandomState(5)
+    planner = _line_planner()
+    for _ in range(300):
+        result = planner.step(
+            rng.uniform(0.0, 10.0, 201), ANGLES,
+            pose=(float(rng.uniform(0.0, 60.0)), float(rng.uniform(-0.5, 0.5))),
+            yaw=float(rng.uniform(-0.3, 0.3)),
+            speed=float(rng.uniform(0.0, 6.0)),
+            dt=0.025,
+        )
+        assert -1.0 <= result.steer_norm <= 1.0
+        assert -1.0 <= result.throttle <= 1.0
+        assert np.isfinite(result.v_target)
+
+
+def test_load_path_rejects_a_mismatched_profile():
+    planner = Planner(Vehicle.default(), PlannerConfig())
+    with pytest.raises(ValueError):
+        planner.load_path(STRAIGHT, np.zeros(7))

@@ -36,13 +36,21 @@ from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Float32
 from visualization_msgs.msg import Marker, MarkerArray
 
-from team_driver.core.gap import GapConfig
+from team_driver.core.build import load_racing_stack
 from team_driver.core.lidar import beam_angles
-from team_driver.core.planner import Planner, PlannerConfig
+from team_driver.core.params import ALL_GROUPS, build_configs
+from team_driver.core.planner import Planner
 from team_driver.core.vehicle import Vehicle
 
 #: Warn when a control step eats this much of the 25 ms budget (40 Hz LiDAR).
 LOOP_BUDGET_S = 0.020
+
+#: Where to look for the racing line when `line.raceline_csv` is blank. The
+#: repository is bind-mounted at /hackathon inside the container.
+RACELINE_CANDIDATES = (
+    "/hackathon/maps/icra26_compete_raceline.csv",
+    "/hackathon/maps/icra26_compete_centerline.csv",
+)
 
 
 def devkit_qos() -> QoSProfile:
@@ -60,30 +68,6 @@ def devkit_qos() -> QoSProfile:
     )
 
 
-#: ROS parameter name -> (GapConfig field, default). Flat dotted names so a
-#: sweep can write one YAML file and never touch code.
-_GAP_PARAMS = {
-    "gap.max_range": ("max_range", 10.0),
-    "gap.car_half_width": ("car_half_width", 0.20),
-    "gap.disparity_threshold": ("disparity_threshold", 0.3),
-    "gap.bubble_radius": ("bubble_radius", 0.35),
-    "gap.gap_threshold_frac": ("gap_threshold_frac", 0.55),
-    "gap.forward_cone_rad": ("forward_cone_rad", 0.26),
-    "gap.stop_margin": ("stop_margin", 0.35),
-    "gap.v_min": ("v_min", 0.5),
-    "gap.v_max": ("v_max", 6.0),
-    "gap.steer_speed_gain": ("steer_speed_gain", 0.7),
-}
-
-_SPEED_PARAMS = {
-    "speed.kp": ("kp", 0.05),
-    "speed.ki": ("ki", 0.15),
-    "speed.integral_limit": ("integral_limit", 0.30),
-    "speed.lift_band": ("lift_band", 0.5),
-    "speed.brake_gain": ("brake_gain", 0.30),
-}
-
-
 class Driver(Node):
 
     def __init__(self):
@@ -91,31 +75,28 @@ class Driver(Node):
 
         self.declare_parameter("vehicle_ns", "/autodrive/roboracer_1")
         self.declare_parameter("vehicle_config", "")
-        for name, (_, default) in _GAP_PARAMS.items():
-            self.declare_parameter(name, default)
-        for name, (_, default) in _SPEED_PARAMS.items():
-            self.declare_parameter(name, default)
+        self.declare_parameter("line.raceline_csv", "")
+        self.declare_parameter("line.grip_fraction", 0.30)
+        self.declare_parameter("line.v_max", 6.0)
+        for group in ALL_GROUPS:
+            for name, (_, default) in group.items():
+                self.declare_parameter(name, default)
 
         vehicle = self._load_vehicle()
-        config = PlannerConfig(
-            gap=GapConfig(
-                **{
-                    field: self.get_parameter(name).value
-                    for name, (field, _) in _GAP_PARAMS.items()
-                }
-            ),
-            **{
-                field: self.get_parameter(name).value
-                for name, (field, _) in _SPEED_PARAMS.items()
-            },
-        )
+        config = build_configs({
+            name: self.get_parameter(name).value
+            for group in ALL_GROUPS for name in group
+        })
         self.planner = Planner(vehicle, config)
+        self._load_line(vehicle)
 
         namespace = str(self.get_parameter("vehicle_ns").value).rstrip("/")
         qos = devkit_qos()
 
-        self.throttle_pub = self.create_publisher(Float32, f"{namespace}/throttle_command", qos)
-        self.steering_pub = self.create_publisher(Float32, f"{namespace}/steering_command", qos)
+        self.throttle_pub = self.create_publisher(
+            Float32, f"{namespace}/throttle_command", qos)
+        self.steering_pub = self.create_publisher(
+            Float32, f"{namespace}/steering_command", qos)
         self.marker_pub = self.create_publisher(MarkerArray, "/driver/markers", 1)
 
         self.create_subscription(LaserScan, f"{namespace}/lidar", self.scan_callback, qos)
@@ -159,6 +140,31 @@ class Driver(Node):
             except Exception as error:
                 self.get_logger().error(f"could not read {path}: {error}; using defaults")
         return Vehicle.default()
+
+    def _load_line(self, vehicle: Vehicle) -> None:
+        """Install the racing line, or say loudly that we are reactive only."""
+        requested = str(self.get_parameter("line.raceline_csv").value or "")
+        candidates = [requested] if requested else list(RACELINE_CANDIDATES)
+
+        for candidate in candidates:
+            path, profile = load_racing_stack(
+                vehicle, candidate,
+                grip_fraction=float(self.get_parameter("line.grip_fraction").value),
+                v_max=float(self.get_parameter("line.v_max").value),
+            )
+            if path is not None:
+                self.planner.load_path(path, profile)
+                self.get_logger().info(
+                    f"racing line: {os.path.basename(candidate)}, "
+                    f"{len(path.xy)} samples, {path.length:.2f} m, "
+                    f"target speed {profile.min():.2f}-{profile.max():.2f} m/s"
+                )
+                return
+
+        self.get_logger().warn(
+            "no racing line loaded - running reactive (gap) mode only. "
+            "Looked in: " + ", ".join(candidates)
+        )
 
     # -- state -----------------------------------------------------------
 
@@ -207,7 +213,8 @@ class Driver(Node):
         """Beam angles, rebuilt only when the scan's geometry changes."""
         signature = (scan.angle_min, scan.angle_increment, len(scan.ranges))
         if signature != self._angle_signature:
-            self._angles = beam_angles(scan.angle_min, scan.angle_increment, len(scan.ranges))
+            self._angles = beam_angles(
+                scan.angle_min, scan.angle_increment, len(scan.ranges))
             self._angle_signature = signature
         return self._angles
 

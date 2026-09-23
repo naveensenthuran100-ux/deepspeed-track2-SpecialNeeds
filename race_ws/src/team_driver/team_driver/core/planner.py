@@ -55,8 +55,11 @@ class PlannerConfig:
 
     # Pure pursuit.
     k_lookahead: float = 0.35
-    min_lookahead: float = 0.6
-    max_lookahead: float = 3.0
+    min_lookahead: float = 0.45
+    max_lookahead: float = 2.0
+    #: Cap the lookahead at this fraction of the local turn radius. Aiming
+    #: further ahead than the corner radius tracks a chord across the corner.
+    curvature_cap: float = 0.8
 
     #: Give up on the line if we are further than this from it, in metres.
     #: Either the pose is wrong or we have already left the track; in both
@@ -98,6 +101,7 @@ class Planner:
             k_lookahead=self.config.k_lookahead,
             min_lookahead=self.config.min_lookahead,
             max_lookahead=self.config.max_lookahead,
+            curvature_cap=self.config.curvature_cap,
         )
         self.speed_controller = SpeedController(
             vehicle,

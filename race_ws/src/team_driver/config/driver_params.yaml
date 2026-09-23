@@ -77,3 +77,46 @@ driver:
       # profile plans braking at a_brake_max, so this must be high enough
       # that the controller can actually ask for it.
       brake_gain: 1.0
+
+    # ---- the racing line -------------------------------------------------
+    line:
+      # Blank searches /hackathon/maps for the generated racing line, then
+      # falls back to the shipped centreline. Regenerate the line with:
+      #   python3 -m team_driver.tools.build_raceline --map ... --out ...
+      raceline_csv: ""
+
+      # How much of the measured lateral grip the speed profile asks for.
+      # THE aggression dial, and there is a cliff in it. In a 48-config
+      # surrogate sweep, 0.30 and 0.35 completed 24/24; 0.40 completed 4/12
+      # and 0.45 completed 0/12. The car can corner faster than 0.35 but
+      # cannot TRACK the line there, so it runs wide and leaves the circuit.
+      # Raising that ceiling (curvature feed-forward on the steering) is the
+      # biggest lap-time lever left. Unconfirmed on the real simulator.
+      grip_fraction: 0.30
+
+      # Ceiling on the profile's target speed, m/s.
+      v_max: 6.0
+
+    # ---- path tracking ---------------------------------------------------
+    pursuit:
+      # Lookahead is min + k * speed, then capped at curvature_cap / |kappa|.
+      k_lookahead: 0.35
+      min_lookahead: 0.45
+      max_lookahead: 2.0
+      # Aiming further ahead than the corner radius tracks a chord across the
+      # corner instead of round it. This circuit turns at about 1.1 m.
+      curvature_cap: 0.8
+
+    # ---- when to give up on the line ------------------------------------
+    mode:
+      # Distance from the line past which we stop believing it, m.
+      max_path_offset: 1.2
+      # A LiDAR return within this of the path ahead is an obstruction, m.
+      # Must stay well under the corridor half-width (~0.67 m at its
+      # tightest) or the boundary itself reads as an obstacle.
+      block_radius: 0.30
+      block_min_horizon: 1.5
+      block_samples: 8
+      # Hysteresis in frames at 40 Hz: quick to duck, slow to commit back.
+      block_enter_frames: 3
+      block_exit_frames: 10

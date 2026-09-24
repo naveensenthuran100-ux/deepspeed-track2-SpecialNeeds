@@ -156,3 +156,84 @@ def test_devkit_qos_is_reliable_keep_last_one(driver_module):
     assert "QoSReliabilityPolicy.RELIABLE" in source
     assert "QoSHistoryPolicy.KEEP_LAST" in source
     assert "depth=1" in source
+
+
+# ===========================================================================
+# The development nodes. Same blind spot: nothing else imports them.
+# ===========================================================================
+
+@pytest.fixture
+def tools_modules(driver_module):
+    import team_driver.tools.map_record as map_record
+    import team_driver.tools.sysid_drive as sysid_drive
+
+    yield sysid_drive, map_record
+
+    for name in ("team_driver.tools.sysid_drive", "team_driver.tools.map_record"):
+        sys.modules.pop(name, None)
+
+
+def test_sysid_node_constructs(tools_modules):
+    sysid_drive, _ = tools_modules
+    node = sysid_drive.SysIdDrive()
+    assert node.vehicle is not None
+    assert node.follower is not None
+
+
+def test_map_record_node_constructs(tools_modules):
+    _, map_record = tools_modules
+    node = map_record.MapRecord()
+    assert node.poses == []
+
+
+def test_map_record_saves_nothing_when_nothing_was_recorded(tools_modules):
+    _, map_record = tools_modules
+    node = map_record.MapRecord()
+    node.save()          # must warn, not raise, and write no file
+
+
+def test_sysid_schedule_visits_every_phase_then_stops(tools_modules):
+    """The schedule has to end, or the car never stops and the log never writes."""
+    sysid_drive, _ = tools_modules
+    node = sysid_drive.SysIdDrive()
+    node.speed = 2.0
+    node.yaw_rate = 0.5
+
+    ended = False
+    for step in range(0, 20000):
+        node.elapsed = step * 0.025
+        if node._throttle_for(node.elapsed) is None:
+            ended = True
+            break
+    assert ended, "the identification schedule never finishes"
+
+    phases = {row["phase"] for row in node.rows}
+    assert phases == {"throttle_sweep", "longitudinal", "grip"}
+
+
+def test_sysid_throttle_stays_in_range(tools_modules):
+    sysid_drive, _ = tools_modules
+    node = sysid_drive.SysIdDrive()
+    node.speed = 2.0
+
+    for step in range(0, 6000):
+        node.elapsed = step * 0.025
+        throttle = node._throttle_for(node.elapsed)
+        if throttle is None:
+            break
+        assert -1.0 <= throttle <= 1.0
+
+
+def test_sysid_records_a_steady_speed_for_every_throttle_step(tools_modules):
+    sysid_drive, _ = tools_modules
+    node = sysid_drive.SysIdDrive()
+    node.speed = 2.0
+
+    for step in range(0, 20000):
+        node.elapsed = step * 0.025
+        if node._throttle_for(node.elapsed) is None:
+            break
+
+    sweep = [r for r in node.rows if r["phase"] == "throttle_sweep"]
+    assert len(sweep) == len(sysid_drive.THROTTLE_STEPS)
+    assert {r["throttle"] for r in sweep} == set(sysid_drive.THROTTLE_STEPS)

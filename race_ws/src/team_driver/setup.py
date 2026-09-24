@@ -27,6 +27,9 @@ setup(
             # Keep this entry: the judges run `ros2 run team_driver driver`.
             # Add more of your own alongside it if you like.
             'driver = team_driver.driver:main',
+            # Development tools. Not part of a scored run.
+            'sysid_drive = team_driver.tools.sysid_drive:main',
+            'map_record = team_driver.tools.map_record:main',
         ],
     },
 )

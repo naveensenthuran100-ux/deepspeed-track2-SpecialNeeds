@@ -76,7 +76,7 @@ class Driver(Node):
         self.declare_parameter("vehicle_ns", "/autodrive/roboracer_1")
         self.declare_parameter("vehicle_config", "")
         self.declare_parameter("line.raceline_csv", "")
-        self.declare_parameter("line.grip_fraction", 0.30)
+        self.declare_parameter("line.grip_fraction", 0.70)
         self.declare_parameter("line.v_max", 6.0)
         # How old the pose may be before we stop believing it, in simulated
         # seconds. Ten frames at 40 Hz.

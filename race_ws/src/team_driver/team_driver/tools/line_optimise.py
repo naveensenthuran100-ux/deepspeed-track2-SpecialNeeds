@@ -40,12 +40,17 @@ from ..core.track import Centreline, OccupancyGrid
 #: Half the car's width. The margin a caller asks for is on top of this.
 CAR_HALF_WIDTH = 0.135
 
+#: Floor under a curvature weight, so a stationary sample cannot vanish from
+#: the objective entirely and leave its offset unconstrained.
+_MIN_WEIGHT = 1e-6
+
 #: Half-width of a pinned bound, in metres. Small enough to be no offset at
 #: all, wide enough for a solver that insists on strict ordering.
 _PIN = 1e-9
 
 
-def optimise_offsets(centre: Centreline, lower, upper, smoothing: float = 0.0):
+def optimise_offsets(centre: Centreline, lower, upper, smoothing: float = 0.0,
+                     weights=None):
     """Lateral offsets minimising total squared curvature, within bounds.
 
     Args:
@@ -54,6 +59,9 @@ def optimise_offsets(centre: Centreline, lower, upper, smoothing: float = 0.0):
             to the right, matching the left-hand normal.
         smoothing: optional weight pulling the line back towards the
             centreline. Zero means "purely minimum curvature".
+        weights: optional per-sample weight on the curvature residual. Used by
+            the minimum-time refinement to say "curvature here costs more lap
+            time than curvature there".
     """
     from scipy.optimize import lsq_linear
 
@@ -80,6 +88,12 @@ def optimise_offsets(centre: Centreline, lower, upper, smoothing: float = 0.0):
     second_difference = points[previous] - 2.0 * points + points[following]
     target[2 * rows] = -second_difference[:, 0]
     target[2 * rows + 1] = -second_difference[:, 1]
+
+    if weights is not None:
+        scale = np.repeat(np.sqrt(np.maximum(np.asarray(weights, dtype=np.float64),
+                                             _MIN_WEIGHT)), 2)
+        design = design * scale[:, None]
+        target = target * scale
 
     if smoothing > 0.0:
         design = np.vstack((design, smoothing * np.eye(count)))
@@ -137,3 +151,48 @@ def save_raceline(line: Centreline, path: str, source: str = "") -> None:
         f"Lap length {line.length:.2f} m"
     )
     np.savetxt(path, line.xy, delimiter=",", header=header)
+
+
+def optimise_min_time_raceline(
+    centre: Centreline,
+    grid: OccupancyGrid,
+    margin_m: float = 0.30,
+    iterations: int = 4,
+    grip_fraction: float = 0.85,
+    speed_power: float = 3.0,
+    vehicle=None,
+    max_m: float = 2.0,
+) -> Centreline:
+    """Minimum-*time* line, by iteratively re-weighted minimum curvature.
+
+    Minimum curvature weights every corner equally. Lap time does not: the
+    time cost of curvature scales with how fast the car is going through it,
+    so a fast sweeper is worth straightening far more than a hairpin the car
+    crawls through anyway. Solving the weighted problem, recomputing the
+    speed profile on the result, and re-solving converges towards the
+    minimum-time line while keeping every step a convex least-squares solve -
+    no nonlinear trajectory optimiser, nothing to diverge.
+
+    `speed_power` is the exponent on local speed in the weight. Three is the
+    usual choice: time saved per unit of curvature removed goes roughly as
+    v^3 near the grip limit.
+    """
+    from ..core.profile import speed_profile
+    from ..core.vehicle import Vehicle
+
+    vehicle = vehicle or Vehicle.default()
+    lower, upper = raceline_bounds(centre, grid, margin_m, max_m=max_m)
+
+    line = Centreline(centre.xy.copy())
+    weights = None
+    for _ in range(max(int(iterations), 1)):
+        offsets = optimise_offsets(centre, lower, upper, weights=weights)
+        line = Centreline(centre.xy + offsets[:, None] * centre.normal)
+
+        speeds = speed_profile(line.curvature, line.s, vehicle,
+                               grip_fraction=grip_fraction,
+                               total_length=line.length)
+        weights = speeds ** float(speed_power)
+        weights = weights / np.mean(weights)
+
+    return line

@@ -125,3 +125,61 @@ def test_a_margin_wider_than_the_track_falls_back_to_the_centreline(track):
     grid, centre = track
     line = optimise_raceline(centre, grid, margin_m=1.5)
     assert np.allclose(line.xy, centre.xy, atol=0.02)
+
+
+# ===========================================================================
+# Minimum-time refinement.
+# ===========================================================================
+
+def test_min_time_refinement_does_not_beat_min_curvature_here(track):
+    """A measured negative result, pinned so we notice if it changes.
+
+    The theory is sound: lap time cost per unit of curvature scales with how
+    fast the car is going through it, so a fast sweeper is worth straightening
+    more than a hairpin the car crawls through anyway. Re-weighting the
+    least-squares by v**3 and re-solving should converge towards minimum time.
+
+    On THIS circuit it does not. Measured over exponents 0.5 / 1 / 2 / 3, with
+    and without weight clipping, every weighting was slower than plain
+    minimum curvature (7.49 s), degrading monotonically with the exponent
+    (7.51 / 7.54 / 7.70 / 8.03 s). The reason looks structural: the track is
+    about 1.8 m wide with corners down to 0.83 m radius, so the boundaries
+    already determine most of the line and there is little freedom left for
+    the weighting to exploit - it mostly perturbs a near-optimal solution.
+
+    Kept because it may well pay off once sysid gives real grip numbers, or
+    on a wider circuit. Not shipped: optimise_raceline stays the default.
+    """
+    from team_driver.tools.line_optimise import optimise_min_time_raceline
+
+    grid, centre = track
+    curvature_line = optimise_raceline(centre, grid, margin_m=0.35)
+    time_line = optimise_min_time_raceline(centre, grid, margin_m=0.35, iterations=4)
+    # Record the gap rather than asserting a direction we have not earned.
+    gap = _profile_lap_time(time_line, 0.85) - _profile_lap_time(curvature_line, 0.85)
+    assert -0.5 < gap < 1.0, f"min-time refinement moved by {gap:+.2f} s; re-measure"
+
+
+def test_min_time_line_stays_on_the_track(track):
+    from team_driver.tools.line_optimise import optimise_min_time_raceline
+
+    grid, centre = track
+    line = optimise_min_time_raceline(centre, grid, margin_m=0.35, iterations=4)
+    assert np.all(grid.is_free_many(line.xy))
+
+
+def test_min_time_line_keeps_the_sample_count(track):
+    from team_driver.tools.line_optimise import optimise_min_time_raceline
+
+    grid, centre = track
+    line = optimise_min_time_raceline(centre, grid, margin_m=0.35, iterations=3)
+    assert len(line.xy) == len(centre.xy)
+
+
+def test_min_time_line_is_deterministic(track):
+    from team_driver.tools.line_optimise import optimise_min_time_raceline
+
+    grid, centre = track
+    a = optimise_min_time_raceline(centre, grid, margin_m=0.35, iterations=3)
+    b = optimise_min_time_raceline(centre, grid, margin_m=0.35, iterations=3)
+    assert np.allclose(a.xy, b.xy)

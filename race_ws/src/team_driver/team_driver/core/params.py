@@ -31,7 +31,7 @@ SPEED_PARAMS = {
     "speed.kp": ("kp", 0.05),
     "speed.ki": ("ki", 0.15),
     "speed.integral_limit": ("integral_limit", 0.30),
-    "speed.lift_band": ("lift_band", 0.5),
+    "speed.lift_band": ("lift_band", 0.15),
     "speed.brake_gain": ("brake_gain", 1.0),
 }
 
@@ -40,6 +40,12 @@ PURSUIT_PARAMS = {
     "pursuit.min_lookahead": ("min_lookahead", 0.45),
     "pursuit.max_lookahead": ("max_lookahead", 2.0),
     "pursuit.curvature_cap": ("curvature_cap", 0.8),
+    "pursuit.tracker": ("tracker", "feedforward"),
+    "pursuit.tau_preview": ("tau_preview", 0.16),
+    "pursuit.min_preview": ("min_preview", 0.25),
+    "pursuit.max_preview": ("max_preview", 2.5),
+    "pursuit.k_heading": ("k_heading", 0.7),
+    "pursuit.k_cross": ("k_cross", 2.2),
 }
 
 MODE_PARAMS = {

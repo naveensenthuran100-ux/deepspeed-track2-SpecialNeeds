@@ -34,6 +34,7 @@ import numpy as np
 from .gap import GapConfig, GapFollower
 from .lidar import clean
 from .pursuit import PurePursuit
+from .tracker import FeedForwardTracker
 from .speed_controller import SpeedController
 from .track import Centreline
 from .vehicle import Vehicle
@@ -50,8 +51,12 @@ class PlannerConfig:
     kp: float = 0.05
     ki: float = 0.15
     integral_limit: float = 0.30
-    lift_band: float = 0.5
-    brake_gain: float = 0.30
+    #: Small on purpose: coasting through a 0.5 m/s overspeed before braking
+    #: starts the braking late, and cost ~0.2 s a lap in tuning.
+    lift_band: float = 0.15
+    #: Must match params.py. The speed profile plans its braking at
+    #: a_brake_max, so this has to be high enough to actually ask for it.
+    brake_gain: float = 1.0
 
     # Pure pursuit.
     k_lookahead: float = 0.35
@@ -60,6 +65,16 @@ class PlannerConfig:
     #: Cap the lookahead at this fraction of the local turn radius. Aiming
     #: further ahead than the corner radius tracks a chord across the corner.
     curvature_cap: float = 0.8
+
+    #: "feedforward" (curvature feed-forward + Stanley errors) or "pursuit".
+    #: Pure pursuit only turns once error exists, which on 0.83 m corners
+    #: arrives after the corner does; see core/tracker.py.
+    tracker: str = "feedforward"
+    tau_preview: float = 0.16
+    min_preview: float = 0.25
+    max_preview: float = 2.5
+    k_heading: float = 0.7
+    k_cross: float = 2.2
 
     #: Give up on the line if we are further than this from it, in metres.
     #: Either the pose is wrong or we have already left the track; in both
@@ -102,6 +117,14 @@ class Planner:
             min_lookahead=self.config.min_lookahead,
             max_lookahead=self.config.max_lookahead,
             curvature_cap=self.config.curvature_cap,
+        )
+        self.tracker = FeedForwardTracker(
+            vehicle,
+            tau_preview=self.config.tau_preview,
+            min_preview=self.config.min_preview,
+            max_preview=self.config.max_preview,
+            k_heading=self.config.k_heading,
+            k_cross=self.config.k_cross,
         )
         self.speed_controller = SpeedController(
             vehicle,
@@ -185,7 +208,10 @@ class Planner:
         if self.mode == GAP:
             return self._gap(scan, angles)
 
-        result = self.pursuit.step((x, y), heading, speed, self.path)
+        if self.config.tracker == "pursuit":
+            result = self.pursuit.step((x, y), heading, speed, self.path)
+        else:
+            result = self.tracker.step((x, y), heading, speed, self.path)
         # The profile's backward pass already guarantees this speed is slow
         # enough to make whatever is coming, so it is read at our own
         # position rather than at the lookahead point - braking for the

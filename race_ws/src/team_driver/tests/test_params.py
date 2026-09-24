@@ -59,3 +59,29 @@ def test_planner_passes_pursuit_settings_through_to_the_tracker():
     assert planner.pursuit.min_lookahead == 0.22
     assert planner.pursuit.max_lookahead == 3.3
     assert planner.pursuit.curvature_cap == 0.44
+
+
+def test_parameter_defaults_match_the_dataclass_defaults():
+    """The map and the dataclass must agree on every default.
+
+    They did not. `speed.brake_gain` was raised to 1.0 in the map but left at
+    0.30 in PlannerConfig, so the ROS node braked at full authority while
+    every offline experiment - the whole configuration sweep included - ran
+    at one third of it. The sweep's conclusions were measured on a car that
+    could not stop, and the guard above did not catch it because the field
+    existed; only its value was wrong.
+    """
+    gap_defaults = {f.name: f.default for f in dataclasses.fields(GapConfig)}
+    planner_defaults = {f.name: f.default for f in dataclasses.fields(PlannerConfig)}
+
+    mismatches = []
+    for name, (field, default) in GAP_PARAMS.items():
+        if gap_defaults[field] != default:
+            mismatches.append(f"{name}: map={default} dataclass={gap_defaults[field]}")
+    for group in (SPEED_PARAMS, PURSUIT_PARAMS, MODE_PARAMS):
+        for name, (field, default) in group.items():
+            if planner_defaults[field] != default:
+                mismatches.append(
+                    f"{name}: map={default} dataclass={planner_defaults[field]}")
+
+    assert mismatches == [], "parameter defaults have drifted: " + "; ".join(mismatches)

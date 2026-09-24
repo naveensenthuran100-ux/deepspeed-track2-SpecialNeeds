@@ -78,6 +78,9 @@ class Driver(Node):
         self.declare_parameter("line.raceline_csv", "")
         self.declare_parameter("line.grip_fraction", 0.30)
         self.declare_parameter("line.v_max", 6.0)
+        # How old the pose may be before we stop believing it, in simulated
+        # seconds. Ten frames at 40 Hz.
+        self.declare_parameter("pose_timeout_s", 0.25)
         for group in ALL_GROUPS:
             for name, (_, default) in group.items():
                 self.declare_parameter(name, default)
@@ -103,9 +106,11 @@ class Driver(Node):
         self.create_subscription(Odometry, f"{namespace}/odom", self.odom_callback, qos)
         self.create_subscription(Point, f"{namespace}/ips", self.ips_callback, qos)
 
+        self.pose_timeout_s = float(self.get_parameter("pose_timeout_s").value)
         self.position = None
         self.yaw = None
         self.speed = 0.0
+        self._pose_stamp = None
 
         self._angles = None
         self._angle_signature = None
@@ -114,6 +119,7 @@ class Driver(Node):
         self._worst_loop_s = 0.0
         self._marker_divisor = 0
         self._logged_failure = False
+        self._warned_stale = False
 
         if not vehicle.measured:
             self.get_logger().warn(
@@ -169,6 +175,7 @@ class Driver(Node):
     # -- state -----------------------------------------------------------
 
     def odom_callback(self, msg):
+        self._pose_stamp = self._stamp_of(msg)
         self.position = (msg.pose.pose.position.x, msg.pose.pose.position.y)
         q = msg.pose.pose.orientation
         self.yaw = math.atan2(
@@ -182,6 +189,34 @@ class Driver(Node):
         if self.position is None:
             self.position = (msg.x, msg.y)
 
+    @staticmethod
+    def _stamp_of(msg):
+        """Seconds from a message header, or None if it carries no usable stamp."""
+        try:
+            stamp = msg.header.stamp
+            return stamp.sec + stamp.nanosec * 1e-9
+        except AttributeError:
+            return None
+
+    def _pose_if_fresh(self, now):
+        """(position, yaw), or (None, None) if the pose has expired.
+
+        The planner's own guard is cross-track distance, and a pose frozen by
+        a dropped /odom sits exactly ON the line - so that guard never fires
+        and the car follows the racing line open-loop from a pose that
+        stopped being true seconds ago. Gap mode needs no pose at all, so
+        expiring it is strictly safer than trusting it.
+        """
+        if self.position is None or self.yaw is None or self._pose_stamp is None:
+            return None, None
+        if now is None:
+            return self.position, self.yaw
+        # abs() on purpose: a reset or a replayed bag can hand us an earlier
+        # stamp, which is not a reason to start trusting an expired pose.
+        if abs(now - self._pose_stamp) > self.pose_timeout_s:
+            return None, None
+        return self.position, self.yaw
+
     # -- the control loop, once per scan (40 Hz) -------------------------
 
     def scan_callback(self, scan):
@@ -189,8 +224,14 @@ class Driver(Node):
         try:
             angles = self._angles_for(scan)
             dt = self._dt_from(scan)
+            position, yaw = self._pose_if_fresh(self._stamp_of(scan))
+            if position is None and self.position is not None and not self._warned_stale:
+                self.get_logger().warn(
+                    "pose is stale - falling back to reactive mode. "
+                    "Is /odom still publishing?")
+                self._warned_stale = True
             result = self.planner.step(
-                scan.ranges, angles, self.position, self.yaw, self.speed, dt
+                scan.ranges, angles, position, yaw, self.speed, dt
             )
             self._last_steer = result.steer_norm
             self.publish(result.steer_norm, result.throttle)

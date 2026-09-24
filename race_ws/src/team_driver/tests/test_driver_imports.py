@@ -237,3 +237,41 @@ def test_sysid_records_a_steady_speed_for_every_throttle_step(tools_modules):
     sweep = [r for r in node.rows if r["phase"] == "throttle_sweep"]
     assert len(sweep) == len(sysid_drive.THROTTLE_STEPS)
     assert {r["throttle"] for r in sweep} == set(sysid_drive.THROTTLE_STEPS)
+
+
+# ===========================================================================
+# Stale pose. Found in the final review, not by any earlier test.
+# ===========================================================================
+
+def test_a_stale_pose_is_treated_as_no_pose(driver_module):
+    """If /odom stops, the last pose must expire rather than be believed.
+
+    The planner's own guard is cross-track distance, and a frozen pose sits
+    exactly ON the line, so that guard never fires. The car would keep
+    following the racing line open-loop from a pose that stopped being true
+    seconds ago. Gap mode needs no pose at all, so expiring it is strictly
+    safer than trusting it.
+    """
+    node = driver_module.Driver()
+    node.position, node.yaw = (1.0, 2.0), 0.5
+    node._pose_stamp = 10.0
+
+    fresh = node._pose_if_fresh(10.1)
+    stale = node._pose_if_fresh(10.0 + node.pose_timeout_s + 0.01)
+
+    assert fresh == ((1.0, 2.0), 0.5)
+    assert stale == (None, None)
+
+
+def test_a_pose_that_never_arrived_is_not_fresh(driver_module):
+    node = driver_module.Driver()
+    assert node._pose_if_fresh(5.0) == (None, None)
+
+
+def test_pose_freshness_survives_the_clock_going_backwards(driver_module):
+    """A reset or a replayed bag can hand us an earlier stamp; that is not a
+    reason to start trusting a pose we would otherwise have expired."""
+    node = driver_module.Driver()
+    node.position, node.yaw = (1.0, 2.0), 0.5
+    node._pose_stamp = 100.0
+    assert node._pose_if_fresh(1.0) == (None, None)

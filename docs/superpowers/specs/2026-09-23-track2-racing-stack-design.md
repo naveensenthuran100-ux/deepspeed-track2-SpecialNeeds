@@ -177,9 +177,16 @@ artefact to be submitted.
 ### The surrogate
 
 The throughput multiplier. Given the identified bicycle model and the occupancy
-grid, simulate a full lap in pure numpy in roughly 10 ms: integrate the model
-under the real planner and speed controller, test the car's footprint against
-the grid for contact, and return `(lap_time, collisions, trace)`.
+grid, simulate a full lap in pure numpy: integrate the model under the real
+planner and speed controller, test the car's footprint against the grid for
+contact, and return `(lap_time, collisions, trace)`.
+
+Measured cost is about **0.25 s per lap**, sphere-tracing the LiDAR against a
+scipy Euclidean distance transform. (An earlier draft of this spec estimated
+10 ms; that was wrong - no raycast is that cheap. The throughput argument does
+not depend on it: 0.25 s is still roughly 1500x the real simulator, which
+turns a several-hundred-configuration sweep into an overnight job rather than
+a fortnight.)
 
 This lets us sweep thousands of configurations in seconds and send only the
 best handful to the real simulator. It converts a 25-configs-per-day budget

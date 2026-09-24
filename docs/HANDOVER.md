@@ -128,41 +128,51 @@ real grip is near 1.5 g — and we have no evidence either way yet.
 
 ---
 
-## 5. THE open question (experiment was in flight at handover)
+## 5. The grip limit — MEASURED, and it resets expectations
 
-**Find the real grip limit by raising `line.grip_fraction` on the real
-simulator until contact starts.** Since `a_lat_max` is a floor, fractions
-**above 1.0 are legitimate**.
-
-**Partial results, live at handover** (5 laps each, real simulator):
+Walked `line.grip_fraction` up on the real simulator, 5 laps each, until
+contact started:
 
 | grip_fraction | a_lat asked | laps | collisions | best lap | verdict |
 |---|---|---|---|---|---|
-| 0.70 | 3.90 | 5 | 0 | 13.524 s | CLEAN |
-| 1.00 | 5.57 | 5 | 0 | 13.096 s | CLEAN |
-| 1.30 | 7.24 | — | — | — | *in flight* |
-| 1.60 | 8.91 | — | — | — | *pending* |
-| 2.00 | 11.14 | — | — | — | *pending* |
-| 2.50 | 13.93 | — | — | — | *pending* |
+| 0.70 | 3.90 | 5 | **0** | 13.524 s | CLEAN |
+| **1.00** | **5.57** | 5 | **0** | **13.096 s** | **CLEAN** |
+| 1.30 | 7.24 | 5 | 12 | 12.741 s | over the limit |
+| 1.60 | 8.91 | 5 | 20 | 14.689 s | over the limit |
+| 2.00 | 11.14 | 5 | 20 | 15.179 s | over the limit |
+| 2.50 | 13.93 | 5 | 20 | 15.038 s | over the limit |
 
-So the real limit is **already known to exceed 5.57** — grip 1.00 was clean over
-5 laps. Every further clean row raises the floor and moves 7 s closer to
-reachable. **Finish this ladder first.**
+**The car's real lateral grip limit is between 5.57 and 7.24 m/s² — about
+0.6–0.7 g.** Not the 1.0–1.5 g a real RC tyre manages; this is a Unity
+vehicle model, not a tyre.
 
-A ladder script was running when this was written: `/tmp/_ladder.py` inside the
-container, walking grip 0.70 → 2.50, 5 laps each, printing laps/collisions/best
-lap per step. Re-run with:
+### What this means for the target
 
-```bash
-docker exec roboracer_track2 /usr/local/bin/entrypoint.sh bash -lc \
-  "cd /hackathon/race_ws && source install/local_setup.bash && stdbuf -oL python3 /tmp/_ladder.py"
-```
+A ~7 s lap on this circuit requires **14.7 m/s² (1.49 g)**. The car delivers
+roughly **half that**. **7 s is not physically reachable on the `compete`
+circuit with this vehicle**, by any algorithm.
 
-Read it as: the highest grip fraction that stays **CLEAN over 5 laps** is the
-usable edge. Then set `a_lat_max` to `that_fraction × 5.57` and re-run
-everything below.
+If a 7 s time is genuine it was almost certainly *not* this configuration —
+a different AutoDRIVE build (`practice` / `explore` have different circuits),
+a sector rather than a full lap, or the simulator's own HUD clock rather than
+the referee's. Worth establishing before chasing it.
 
----
+**Realistic target: ~10.5–11 s.** That is the idealised floor at this grip on
+the current racing line, against 12.588 s measured today — so there is roughly
+1.5–2 s of real headroom, and it lives in tracking quality and the speed
+profile, not in cornering harder.
+
+### The second finding, which is just as useful
+
+Past the limit, lap times get **worse**, not merely riskier: 14.689 / 15.179 /
+15.038 s at grip 1.60–2.50, against 13.096 s clean. Exceeding grip makes the
+car understeer wide, which costs more time than the extra speed buys — before
+counting the +10 s per collision. At grip 1.30 the raw best lap was 12.741 s,
+marginally quicker than clean, but with **12 collisions = +120 s and a
+disqualification** (limit is 10).
+
+**Operating point: grip_fraction 1.00 on the measured `a_lat_max` of 5.57.**
+Anything above ~1.15 should be treated as off the table.
 
 ## 6. How to run it
 

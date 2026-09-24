@@ -68,6 +68,9 @@ class Vehicle:
     v_max: float = TOP_SPEED_MPS
 
     measured: bool = False
+    #: True only if lateral acceleration actually plateaued during
+    #: identification. When False, `a_lat_max` is a floor, not a limit.
+    grip_saturated: bool = False
 
     # -- construction ----------------------------------------------------
 

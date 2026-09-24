@@ -118,6 +118,48 @@ class SurrogateSensor:
         return np.clip(travelled, 0.0, self.max_range), self.angles
 
 
+@dataclass
+class Perturbation:
+    """Everything we are uncertain about, in one place.
+
+    A configuration that is fast in a noise-free model can be fragile in the
+    real simulator, which is not deterministic and does not match our fitted
+    parameters exactly. Monte Carlo search is only worth running if the noise
+    it samples is the noise we actually face:
+
+      * `vehicle_scale` is model error and is the one that matters most. The
+        PLANNER keeps the nominal vehicle it was given - it believes the
+        numbers in vehicle.json - while the dynamics integrate a scaled one.
+        That is exactly the question "what if the real grip is 20% below what
+        we fitted?", and a configuration that only works at scale 1.0 is one
+        bad measurement away from a disqualification.
+      * `command_delay_steps` is actuation latency, which the bridge's
+        request/response loop can add under load.
+      * the noise terms are sensor and actuator jitter.
+    """
+
+    seed: int = 0
+    scan_noise_m: float = 0.0
+    steer_noise: float = 0.0
+    throttle_noise: float = 0.0
+    command_delay_steps: int = 0
+    start_jitter_m: float = 0.0
+    start_yaw_jitter: float = 0.0
+    vehicle_scale: float = 1.0
+
+
+def scaled_vehicle(vehicle: Vehicle, scale: float) -> Vehicle:
+    """A vehicle with its LIMITS scaled and its geometry untouched.
+
+    Wheelbase, width and steering lock are published specification, not
+    things we measured, so they carry no error to model.
+    """
+    data = vehicle.to_dict()
+    for field in ("a_lat_max", "a_accel_max", "a_brake_max", "a_coast"):
+        data[field] = data[field] * float(scale)
+    return Vehicle(**data)
+
+
 def longitudinal_accel(vehicle: Vehicle, throttle: float, speed: float,
                        lag: float = 2.0) -> float:
     """Acceleration, in m/s^2, for a throttle command at a given speed.
@@ -166,6 +208,7 @@ def simulate(
     sensor: Optional[SurrogateSensor] = None,
     beam_count: int = DEFAULT_BEAMS,
     steer_override: Optional[float] = None,
+    perturbation: Optional["Perturbation"] = None,
     speed_lag: float = 2.0,
     collision_debounce_s: float = 0.25,
     stuck_timeout_s: float = 3.0,
@@ -182,7 +225,20 @@ def simulate(
     sensor = sensor or SurrogateSensor(grid, max_range=10.0, beam_count=beam_count)
     planner.reset()
 
+    noise = perturbation or Perturbation()
+    rng = np.random.RandomState(noise.seed)
+    # The planner keeps `vehicle`; the dynamics use `truth`. When they differ,
+    # the car is not the car the planner thinks it is - which is the point.
+    truth = (scaled_vehicle(vehicle, noise.vehicle_scale)
+             if noise.vehicle_scale != 1.0 else vehicle)
+    pending = []
+
     x, y, yaw = (float(v) for v in start)
+    if noise.start_jitter_m > 0.0:
+        x += float(rng.normal(0.0, noise.start_jitter_m))
+        y += float(rng.normal(0.0, noise.start_jitter_m))
+    if noise.start_yaw_jitter > 0.0:
+        yaw += float(rng.normal(0.0, noise.start_yaw_jitter))
     speed = 0.0
     steer = 0.0
 
@@ -201,6 +257,7 @@ def simulate(
     body = np.array([0.0, vehicle.wheelbase / 2.0, vehicle.wheelbase,
                      vehicle.length - 0.08])
     half_width = vehicle.width / 2.0
+    _ = truth  # dynamics use `truth`; the footprint is geometry, not a limit
 
     steps = int(max_time_s / dt)
     trace = {k: np.zeros(steps) for k in
@@ -210,22 +267,43 @@ def simulate(
 
     for _ in range(steps):
         ranges, angles = sensor.scan(x, y, yaw)
+        if noise.scan_noise_m > 0.0:
+            ranges = np.clip(
+                ranges + rng.normal(0.0, noise.scan_noise_m, ranges.shape),
+                0.0, sensor.max_range)
         plan = planner.step(ranges, angles, (x, y), yaw, speed, dt)
 
+        steer_cmd = plan.steer_norm
+        throttle_cmd = plan.throttle
+        if noise.steer_noise > 0.0:
+            steer_cmd += float(rng.normal(0.0, noise.steer_noise))
+        if noise.throttle_noise > 0.0:
+            throttle_cmd += float(rng.normal(0.0, noise.throttle_noise))
+        steer_cmd = float(np.clip(steer_cmd, -1.0, 1.0))
+        throttle_cmd = float(np.clip(throttle_cmd, -1.0, 1.0))
+
+        # Actuation latency: what reaches the wheels is what we asked for a
+        # few frames ago.
+        pending.append((steer_cmd, throttle_cmd))
+        if len(pending) > max(int(noise.command_delay_steps), 0):
+            steer_cmd, throttle_cmd = pending.pop(0)
+        else:
+            steer_cmd, throttle_cmd = 0.0, 0.0
+
         # -- actuators -----------------------------------------------------
-        wanted = vehicle.norm_to_steer(
-            plan.steer_norm if steer_override is None else steer_override
+        wanted = truth.norm_to_steer(
+            steer_cmd if steer_override is None else steer_override
         )
-        limit = vehicle.max_steer_rate * dt
+        limit = truth.max_steer_rate * dt
         steer += min(max(wanted - steer, -limit), limit)
 
-        accel = longitudinal_accel(vehicle, plan.throttle, speed, speed_lag)
+        accel = longitudinal_accel(truth, throttle_cmd, speed, speed_lag)
         speed = max(0.0, speed + accel * dt)
 
         # -- motion, grip-limited -----------------------------------------
-        yaw_rate = speed * math.tan(steer) / vehicle.wheelbase
+        yaw_rate = speed * math.tan(steer) / truth.wheelbase
         if speed > 1e-6:
-            grip_limit = vehicle.a_lat_max / speed
+            grip_limit = truth.a_lat_max / speed
             yaw_rate = min(max(yaw_rate, -grip_limit), grip_limit)
 
         yaw += yaw_rate * dt

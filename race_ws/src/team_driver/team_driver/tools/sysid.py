@@ -29,6 +29,13 @@ from ..core.vehicle import Vehicle
 #: sample of a wheel skipping a kerb is not the grip limit.
 LIMIT_PERCENTILE = 95.0
 
+#: Floor on the actuator map's slope, so a degenerate sweep cannot produce a
+#: car that refuses to move.
+_MIN_SLOPE = 1.0
+
+#: Lateral acceleration counts as saturated if its top decile is this flat.
+_SATURATION_TOLERANCE = 0.06
+
 
 def fit_actuator_map(throttles, speeds):
     """Least-squares [c1, c2] for the steady-state map v = c1*u + c2*u^2.
@@ -36,12 +43,29 @@ def fit_actuator_map(throttles, speeds):
     No intercept on purpose: zero throttle holds zero speed, and letting the
     fit invent an offset there makes `throttle_for_speed(0)` nonzero, which
     creeps the car off the grid before the flag.
+
+    The quadratic is forced to stay monotonic over the whole [0, 1] range,
+    not just over the throttles we sampled. On a real run the car can only be
+    swept over a narrow band - a 54 m circuit has nowhere to hold full
+    throttle - and an unconstrained fit curves back down outside it. The
+    first real identification run produced v = 39.8u - 100.3u^2, which peaks
+    at u = 0.2 and is NEGATIVE by u = 1.0. `throttle_for_speed` inverts this
+    map in closed form and returns 1.0 for anything above its top speed, so a
+    negative top speed means permanent full throttle.
     """
     u = np.asarray(throttles, dtype=np.float64).ravel()
     v = np.asarray(speeds, dtype=np.float64).ravel()
     design = np.stack([u, u * u], axis=1)
     coeffs, *_ = np.linalg.lstsq(design, v, rcond=None)
-    return [float(coeffs[0]), float(coeffs[1])]
+    c1, c2 = float(coeffs[0]), float(coeffs[1])
+
+    # Monotonic on [0, 1] requires dv/du = c1 + 2*c2*u >= 0 at u = 1, i.e.
+    # c2 >= -c1/2. Clamp rather than refit: the data constrains the low-
+    # throttle behaviour well and says nothing about the top, so the flattest
+    # curve consistent with both is the honest choice.
+    if c1 <= 0.0:
+        return [max(c1, _MIN_SLOPE), 0.0]
+    return [c1, max(c2, -c1 / 2.0)]
 
 
 def fit_longitudinal(times, speed, throttle, dt=None) -> Dict[str, float]:
@@ -68,11 +92,39 @@ def fit_longitudinal(times, speed, throttle, dt=None) -> Dict[str, float]:
         chosen = values[mask]
         return float(np.percentile(chosen, LIMIT_PERCENTILE)) if chosen.size else 0.0
 
+    coast = limit(np.abs(commanded) <= 0.05, -accel)
+    brake = limit(commanded < -0.05, -accel)
+
+    # Coasting cannot out-brake braking. When the fit says otherwise the
+    # coast samples are contaminated - on a circuit the car is usually
+    # cornering while it coasts, and scrubbing off speed in a corner is not
+    # coast-down. Believe the braking number and treat coast as bounded by it.
+    if coast > brake > 0.0:
+        coast = min(coast, brake)
+
     return {
         "a_accel_max": limit(commanded > 0.05, accel),
-        "a_coast": limit(np.abs(commanded) <= 0.05, -accel),
-        "a_brake_max": limit(commanded < -0.05, -accel),
+        "a_coast": coast,
+        "a_brake_max": brake,
     }
+
+
+def grip_saturated(lateral, tolerance: float = _SATURATION_TOLERANCE) -> bool:
+    """Did the lateral acceleration actually plateau?
+
+    If it is still rising when the run ends, the car never reached the limit
+    and the figure is a FLOOR, not a measurement. Optimising a speed profile
+    against a floor is optimising for a car with more grip than we have
+    evidence for, which is how a sweep talks itself into a disqualification.
+    """
+    values = np.sort(np.abs(np.asarray(lateral, dtype=np.float64).ravel()))
+    if values.size < 20:
+        return False
+    top = values[int(0.90 * values.size):]
+    peak = float(top[-1])
+    if peak <= 1e-9:
+        return False
+    return bool((peak - float(top[0])) / peak < tolerance)
 
 
 def fit_grip(speeds, radii, lateral) -> float:
@@ -121,6 +173,7 @@ def fit_vehicle(log: Dict, base: Optional[Vehicle] = None) -> Vehicle:
         speeds, radii, lateral = log["grip"]
         if len(lateral):
             vehicle.a_lat_max = fit_grip(speeds, radii, lateral)
+            vehicle.grip_saturated = grip_saturated(lateral)
             fitted = True
 
     vehicle.measured = bool(fitted)
@@ -186,6 +239,14 @@ def main(argv=None):
     print(f"{'throttle_v_coeffs':<20} {str(before.throttle_v_coeffs):>10} "
           f"{str([round(c, 3) for c in vehicle.throttle_v_coeffs]):>10}")
     print(f"\nwrote {args.out} (measured={vehicle.measured})")
+    if not getattr(vehicle, "grip_saturated", False):
+        print(
+            "\nWARNING: lateral acceleration never plateaued, so a_lat_max is a\n"
+            "         LOWER BOUND, not the limit - the car never reached the edge\n"
+            "         of grip during identification. Treat it as 'at least this\n"
+            "         much' and find the real edge by raising line.grip_fraction\n"
+            "         on the simulator until contact starts."
+        )
     print("Re-run lab/sweep.py: every previous result was relative to the assumed values.")
     return 0
 

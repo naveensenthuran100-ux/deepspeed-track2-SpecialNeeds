@@ -101,3 +101,67 @@ def test_fit_vehicle_keeps_published_geometry():
 def test_fit_vehicle_without_data_refuses_to_claim_measurement():
     fitted = fit_vehicle({})
     assert fitted.measured is False
+
+
+# ===========================================================================
+# Defects the first real identification run exposed.
+# ===========================================================================
+
+def test_v_max_is_never_extrapolated_outside_the_sampled_throttles():
+    """The real run swept throttle 0.08-0.35 and the fitted quadratic curves
+    back down outside that range. Evaluating it at u=1.0 gave v_max = -60.45,
+    and a negative ceiling makes `throttle_for_speed` return 1.0 for every
+    speed - permanent full throttle. The fit must not be trusted past the
+    data that produced it.
+    """
+    throttles = np.linspace(0.08, 0.35, 12)
+    speeds = 39.803 * throttles - 100.254 * throttles ** 2   # the real fit
+    fitted = fit_vehicle({"throttle_sweep": (throttles, speeds)})
+    assert fitted.v_max > 0.0
+    assert fitted.speed_for_throttle(1.0) > 0.0
+
+
+def test_actuator_map_stays_monotonic_over_the_whole_range():
+    """`throttle_for_speed` inverts this map in closed form, which is only
+    valid while it is monotonic on [0, 1]."""
+    throttles = np.linspace(0.08, 0.35, 12)
+    speeds = 39.803 * throttles - 100.254 * throttles ** 2
+    fitted = fit_vehicle({"throttle_sweep": (throttles, speeds)})
+    sampled = [fitted.speed_for_throttle(u) for u in np.linspace(0.0, 1.0, 60)]
+    assert all(b >= a - 1e-9 for a, b in zip(sampled, sampled[1:]))
+
+
+def test_coasting_never_fits_harder_than_braking():
+    """The run measured a_coast 8.37 against a_brake 7.59, which is
+    physically backwards and silently inverts the controller's whole
+    lift-rather-than-brake policy."""
+    times = np.arange(0, 3.0, 0.025)
+    speed = np.concatenate([np.linspace(0, 6.0, 40),
+                            np.linspace(6.0, 2.0, 40),    # violent "coast"
+                            np.linspace(2.0, 1.5, 40)])   # gentle "brake"
+    throttle = np.concatenate([np.full(40, 0.8), np.zeros(40), np.full(40, -1.0)])
+    limits = fit_longitudinal(times, speed, throttle, dt=0.025)
+    assert limits["a_coast"] <= limits["a_brake_max"] + 1e-9
+
+
+def test_fitted_vehicle_is_always_usable_by_the_controller():
+    """Whatever the data, the result has to be a car the stack can drive."""
+    throttles = np.linspace(0.08, 0.35, 12)
+    speeds = 39.803 * throttles - 100.254 * throttles ** 2
+    fitted = fit_vehicle({"throttle_sweep": (throttles, speeds)})
+    for target in (0.0, 1.0, 3.0, 8.0, 50.0):
+        u = fitted.throttle_for_speed(target)
+        assert 0.0 <= u <= 1.0
+    assert fitted.throttle_for_speed(0.0) == 0.0
+
+
+def test_grip_is_reported_as_a_lower_bound_when_never_saturated():
+    """If the lateral acceleration never plateaus, the car never reached its
+    limit and the number is a floor, not a measurement."""
+    from team_driver.tools.sysid import grip_saturated
+
+    speeds = np.linspace(1.0, 5.0, 60)
+    rising = speeds ** 2 / 1.5                      # never levels off
+    plateaued = np.minimum(speeds ** 2 / 1.5, 8.1)  # clearly levels off
+    assert grip_saturated(rising) is False
+    assert grip_saturated(plateaued) is True

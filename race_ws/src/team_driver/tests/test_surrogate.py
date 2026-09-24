@@ -252,3 +252,107 @@ def test_accelerating_is_bounded_by_the_traction_limit():
     vehicle = Vehicle.default()
     assert longitudinal_accel(vehicle, 1.0, 0.0) <= vehicle.a_accel_max + 1e-9
     assert longitudinal_accel(vehicle, 1.0, 0.0) > 0.0
+
+
+# ===========================================================================
+# Perturbation, for Monte Carlo robustness search.
+# ===========================================================================
+
+def _mc_planner(vehicle=None):
+    vehicle = vehicle or Vehicle.default()
+    planner = Planner(vehicle, PlannerConfig())
+    return planner
+
+
+def test_same_seed_gives_an_identical_run(real_track):
+    """Reproducibility is the whole basis of comparing two configurations."""
+    from team_driver.tools.surrogate import Perturbation
+
+    grid, line = real_track
+    vehicle = Vehicle.default()
+    sensor = SurrogateSensor(grid, max_range=10.0, beam_count=181)
+    start = (line.xy[0][0], line.xy[0][1],
+             float(np.arctan2(line.tangent[0][1], line.tangent[0][0])))
+
+    runs = []
+    for _ in range(2):
+        planner = _mc_planner(vehicle)
+        planner.load_path(line, np.full(len(line.xy), 4.0))
+        runs.append(simulate(planner, vehicle, grid, start=start,
+                             distance_m=line.length, max_time_s=90.0, sensor=sensor,
+                             perturbation=Perturbation(seed=7, scan_noise_m=0.05,
+                                                       steer_noise=0.01)))
+    assert abs(runs[0].elapsed_s - runs[1].elapsed_s) < 1e-9
+    assert runs[0].collisions == runs[1].collisions
+
+
+def test_different_seeds_give_different_runs(real_track):
+    from team_driver.tools.surrogate import Perturbation
+
+    grid, line = real_track
+    vehicle = Vehicle.default()
+    sensor = SurrogateSensor(grid, max_range=10.0, beam_count=181)
+    start = (line.xy[0][0], line.xy[0][1],
+             float(np.arctan2(line.tangent[0][1], line.tangent[0][0])))
+
+    times = []
+    for seed in (1, 2, 3):
+        planner = _mc_planner(vehicle)
+        planner.load_path(line, np.full(len(line.xy), 4.0))
+        times.append(simulate(planner, vehicle, grid, start=start,
+                              distance_m=line.length, max_time_s=90.0, sensor=sensor,
+                              perturbation=Perturbation(seed=seed, scan_noise_m=0.08,
+                                                        steer_noise=0.02,
+                                                        start_jitter_m=0.05)).elapsed_s)
+    assert len(set(round(t, 6) for t in times)) > 1
+
+
+def test_zero_perturbation_matches_an_unperturbed_run(real_track):
+    from team_driver.tools.surrogate import Perturbation
+
+    grid, line = real_track
+    vehicle = Vehicle.default()
+    sensor = SurrogateSensor(grid, max_range=10.0, beam_count=181)
+    start = (line.xy[0][0], line.xy[0][1],
+             float(np.arctan2(line.tangent[0][1], line.tangent[0][0])))
+
+    def run(perturbation):
+        planner = _mc_planner(vehicle)
+        planner.load_path(line, np.full(len(line.xy), 4.0))
+        return simulate(planner, vehicle, grid, start=start, distance_m=line.length,
+                        max_time_s=90.0, sensor=sensor, perturbation=perturbation)
+
+    assert abs(run(None).elapsed_s - run(Perturbation(seed=1)).elapsed_s) < 1e-9
+
+
+def test_perturbation_never_produces_a_non_finite_state(real_track):
+    from team_driver.tools.surrogate import Perturbation
+
+    grid, line = real_track
+    vehicle = Vehicle.default()
+    sensor = SurrogateSensor(grid, max_range=10.0, beam_count=181)
+    start = (line.xy[0][0], line.xy[0][1],
+             float(np.arctan2(line.tangent[0][1], line.tangent[0][0])))
+    planner = _mc_planner(vehicle)
+    planner.load_path(line, np.full(len(line.xy), 4.0))
+    result = simulate(planner, vehicle, grid, start=start, distance_m=line.length,
+                      max_time_s=90.0, sensor=sensor,
+                      perturbation=Perturbation(seed=3, scan_noise_m=0.3,
+                                                steer_noise=0.1, throttle_noise=0.1,
+                                                command_delay_steps=3,
+                                                start_jitter_m=0.15,
+                                                start_yaw_jitter=0.1))
+    for key in ("x", "y", "v", "yaw"):
+        assert np.all(np.isfinite(result.trace[key]))
+
+
+def test_vehicle_scaling_makes_a_weaker_car_slower(real_track):
+    """Model error is the uncertainty that matters most: a_lat_max is measured
+    with error, and a config must not fall apart if the real car has less
+    grip than we fitted."""
+    from team_driver.tools.surrogate import Perturbation, scaled_vehicle
+
+    weak = scaled_vehicle(Vehicle.default(), 0.7)
+    assert weak.a_lat_max < Vehicle.default().a_lat_max
+    assert weak.a_brake_max < Vehicle.default().a_brake_max
+    assert weak.wheelbase == Vehicle.default().wheelbase   # geometry is not error

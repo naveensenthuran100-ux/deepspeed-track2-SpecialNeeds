@@ -134,6 +134,21 @@ real grip is near 1.5 g — and we have no evidence either way yet.
 simulator until contact starts.** Since `a_lat_max` is a floor, fractions
 **above 1.0 are legitimate**.
 
+**Partial results, live at handover** (5 laps each, real simulator):
+
+| grip_fraction | a_lat asked | laps | collisions | best lap | verdict |
+|---|---|---|---|---|---|
+| 0.70 | 3.90 | 5 | 0 | 13.524 s | CLEAN |
+| 1.00 | 5.57 | 5 | 0 | 13.096 s | CLEAN |
+| 1.30 | 7.24 | — | — | — | *in flight* |
+| 1.60 | 8.91 | — | — | — | *pending* |
+| 2.00 | 11.14 | — | — | — | *pending* |
+| 2.50 | 13.93 | — | — | — | *pending* |
+
+So the real limit is **already known to exceed 5.57** — grip 1.00 was clean over
+5 laps. Every further clean row raises the floor and moves 7 s closer to
+reachable. **Finish this ladder first.**
+
 A ladder script was running when this was written: `/tmp/_ladder.py` inside the
 container, walking grip 0.70 → 2.50, 5 laps each, printing laps/collisions/best
 lap per step. Re-run with:

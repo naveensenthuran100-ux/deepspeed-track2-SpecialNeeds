@@ -81,6 +81,13 @@ SPACE = {
 
 #: The world we are uncertain about. sd on vehicle_scale is deliberately
 #: wide: a_lat_max comes from a short identification run, not a rig.
+#: What the referee actually runs (scripts/evaluate.sh defaults), and the
+#: rule that makes collisions a cliff rather than a slope. The search
+#: simulates fewer laps than this for speed, so the DQ test extrapolates.
+JUDGED_LAPS = 10
+WARMUP_LAPS = 2
+COLLISION_LIMIT = 10
+
 MODEL_SCALE_SD = 0.13
 SCAN_NOISE_M = 0.04
 STEER_NOISE = 0.015
@@ -143,11 +150,22 @@ def _evaluate(job):
                 vehicle_scale=float(np.exp(rng.normal(0.0, MODEL_SCALE_SD))),
             ),
         )
-        if result.status == "COMPLETE":
-            # Net time per lap: the 10 s penalty spread over the laps driven.
-            outcomes.append(result.elapsed_s / laps + 10.0 * result.collisions / laps)
-        else:
+        if result.status != "COMPLETE":
             outcomes.append(float("inf"))
+            continue
+        # The DQ cliff, applied at the distance that is actually judged.
+        # `laps` here is a search-economy choice; the referee runs JUDGED_LAPS
+        # plus warmup, so a collision RATE that looks survivable over 3 laps
+        # can be a disqualification over 12. Extrapolating the rate is an
+        # approximation, but treating 3 laps as the whole run is a much worse
+        # one: it prices the eleventh collision at +10 s when the rules price
+        # it at the entire 100 points.
+        projected = result.collisions * (JUDGED_LAPS + WARMUP_LAPS) / laps
+        if projected > COLLISION_LIMIT:
+            outcomes.append(float("inf"))
+            continue
+        # Net time per lap: the 10 s penalty spread over the laps driven.
+        outcomes.append(result.elapsed_s / laps + 10.0 * result.collisions / laps)
 
     return {**params, **_summarise(outcomes)}
 

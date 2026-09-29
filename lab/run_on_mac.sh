@@ -44,7 +44,7 @@ echo "==> workspace"
 in_container "cd /hackathon/race_ws && colcon build --symlink-install 2>&1 | tail -3"
 
 echo "==> bridge (must start before the simulator: it is the SERVER)"
-in_container "pkill -f sim_bridge 2>/dev/null; true"
+in_container "pkill -f '[s]im_bridge' 2>/dev/null; true"
 in_container "cd /hackathon/race_ws && source install/local_setup.bash && \
   nohup ros2 launch roboracer_referee simulator.launch.py simulator:=false rviz:=false \
   > /hackathon/results/bridge.log 2>&1 &"
@@ -58,7 +58,7 @@ nohup "$SIM" -ip 127.0.0.1 -port 4567 > /tmp/autodrive_sim.log 2>&1 &
 echo "    launched; Unity takes ~2-3 min to compile shaders on a first run"
 
 echo "==> driver"
-in_container "pkill -f 'team_driver driver' 2>/dev/null; true"
+in_container "pkill -f '[t]eam_driver driver' 2>/dev/null; true"
 in_container "cd /hackathon/race_ws && source install/local_setup.bash && \
   nohup ros2 run team_driver driver --ros-args \
   --params-file /hackathon/race_ws/src/team_driver/config/driver_params.yaml \

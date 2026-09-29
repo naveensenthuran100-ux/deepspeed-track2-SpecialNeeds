@@ -88,6 +88,11 @@ JUDGED_LAPS = 10
 WARMUP_LAPS = 2
 COLLISION_LIMIT = 10
 
+#: A reference leader lap for turning lap times into points. Only the SHAPE
+#: matters for ranking - it sets how much lap time one failed draw is worth -
+#: and anything near the realistic front of the field gives the same order.
+REF_LAP_S = 10.5
+
 MODEL_SCALE_SD = 0.13
 SCAN_NOISE_M = 0.04
 STEER_NOISE = 0.015
@@ -99,7 +104,7 @@ MAX_DELAY_STEPS = 2
 _G = {}
 
 
-def _init(vehicle_dict, laps):
+def _init(vehicle_dict, laps, margins=None):
     """Per-worker setup. The distance transform and the racing lines are
     expensive and identical for every candidate, so they are built once."""
     grid = OccupancyGrid.load(os.path.join(MAPS, "icra26_compete.pgm"),
@@ -109,11 +114,30 @@ def _init(vehicle_dict, laps):
     _G["sensor"] = SurrogateSensor(grid, max_range=10.0, beam_count=181)
     _G["vehicle"] = Vehicle(**vehicle_dict)
     _G["laps"] = laps
-    _G["lines"] = {m: optimise_raceline(centre, grid, margin_m=m) for m in MARGINS}
+    _G["lines"] = {m: optimise_raceline(centre, grid, margin_m=m)
+                   for m in (margins or MARGINS)}
 
 
 def _evaluate(job):
     index, params, rollouts = job
+    outcomes, _ = run_rollouts(params, [10_000 * index + roll for roll in range(rollouts)])
+    return {**params, **_summarise(outcomes)}
+
+
+def run_rollouts(params, seeds):
+    """One perturbed run per seed: (net seconds per lap, collisions) lists.
+
+    Each seed fixes one WORLD - model error, noise, latency, start jitter.
+    Passing the same seeds for every candidate compares them on identical
+    worlds (common random numbers), which is what makes a ranking between
+    them mean something rather than measuring whose worlds were kinder.
+
+    A seed may instead be a pair (car_seed, run_seed): the model error then
+    comes from car_seed and everything else from run_seed, so several runs
+    can share one CAR while their noise differs. That is the shape of the
+    judging - three runs of one real vehicle - and see summarise_events for
+    why it matters.
+    """
     vehicle = _G["vehicle"]
     grid, sensor = _G["grid"], _G["sensor"]
     line = _G["lines"][params["margin"]]
@@ -125,9 +149,11 @@ def _evaluate(job):
     yaw0 = float(np.arctan2(line.tangent[0][1], line.tangent[0][0]))
     start = (line.xy[0][0], line.xy[0][1], yaw0)
 
-    outcomes = []
-    for roll in range(rollouts):
-        rng = np.random.RandomState(10_000 * index + roll)
+    outcomes, collisions = [], []
+    for seed in seeds:
+        car_seed, run_seed = seed if isinstance(seed, tuple) else (seed, seed)
+        rng = np.random.RandomState(run_seed)
+        car = rng if car_seed == run_seed else np.random.RandomState(car_seed)
         planner = Planner(vehicle, PlannerConfig(
             tracker="feedforward",
             tau_preview=params["tau_preview"], min_preview=params["min_preview"],
@@ -147,9 +173,10 @@ def _evaluate(job):
                 throttle_noise=THROTTLE_NOISE,
                 command_delay_steps=int(rng.randint(0, MAX_DELAY_STEPS + 1)),
                 start_jitter_m=START_JITTER_M, start_yaw_jitter=START_YAW_JITTER,
-                vehicle_scale=float(np.exp(rng.normal(0.0, MODEL_SCALE_SD))),
+                vehicle_scale=float(np.exp(car.normal(0.0, MODEL_SCALE_SD))),
             ),
         )
+        collisions.append(result.collisions)
         if result.status != "COMPLETE":
             outcomes.append(float("inf"))
             continue
@@ -167,7 +194,7 @@ def _evaluate(job):
         # Net time per lap: the 10 s penalty spread over the laps driven.
         outcomes.append(result.elapsed_s / laps + 10.0 * result.collisions / laps)
 
-    return {**params, **_summarise(outcomes)}
+    return outcomes, collisions
 
 
 def _summarise(outcomes, attempts=3, draws=4000):
@@ -180,13 +207,62 @@ def _summarise(outcomes, attempts=3, draws=4000):
     values = np.array(outcomes)[picks].min(axis=1)
     expected = float(np.mean(values[np.isfinite(values)])) if np.any(np.isfinite(values)) else float("inf")
 
+    # expected_best_of_3 averages only the draws where something finished, so
+    # it is silent about the draws where all three runs failed - the one
+    # outcome that scores zero. Expected POINTS counts them. The rules score
+    # time as a ratio to the leader, so points ~ REF_LAP_S / lap, and zero for
+    # a draw with no scoring run. `effective_lap` turns that back into
+    # seconds so it reads like a lap time, but it is what candidates are
+    # ranked on: it moves with speed AND with the chance of scoring nothing.
+    finite = np.isfinite(values)
+    points = np.zeros(len(values))
+    points[finite] = 100.0 * REF_LAP_S / values[finite]
+    expected_points = float(np.mean(points))
+
     return {
         "rollouts": len(outcomes),
         "completion": rate,
         "expected_best_of_3": expected if rate > 0 else float("inf"),
+        "expected_points": expected_points,
+        "effective_lap": 100.0 * REF_LAP_S / expected_points if expected_points > 0 else float("inf"),
         "p_all_three_fail": float((1.0 - rate) ** attempts),
         "median": float(np.median(finished)) if finished else None,
         "best": float(min(finished)) if finished else None,
+    }
+
+
+def summarise_events(outcomes, attempts=3):
+    """Score outcomes that come in blocks of `attempts` runs of ONE car.
+
+    _summarise resamples every rollout independently, model error included.
+    But the judges run one real vehicle three times. Best-of-three rescues a
+    run spoiled by NOISE - a bad start, a latency spike - and does nothing at
+    all about MODEL error: if the real grip is below what we planned for, it
+    is below it for all three runs, and all three fail together.
+
+    Treating them as independent made a config finishing 88% of its runs
+    look like it scores nothing only 0.2% of the time (0.12 cubed). With the
+    failures correlated it is closer to 12%, and the search was converging on
+    exactly that kind of config. So each block here is one event, the best of
+    its runs, and an event with no finished run scores zero points.
+    """
+    arr = np.asarray(outcomes, dtype=float)
+    events = arr[: len(arr) // attempts * attempts].reshape(-1, attempts).min(axis=1)
+    finite = np.isfinite(events)
+    points = np.zeros(len(events))
+    points[finite] = 100.0 * REF_LAP_S / events[finite]
+    expected_points = float(np.mean(points)) if len(points) else 0.0
+    finished = arr[np.isfinite(arr)]
+    return {
+        "rollouts": len(arr),
+        "events": len(events),
+        "completion": float(np.mean(np.isfinite(arr))) if len(arr) else 0.0,
+        "p_event_zero": float(np.mean(~finite)) if len(events) else 1.0,
+        "expected_best_of_3": float(np.mean(events[finite])) if finite.any() else float("inf"),
+        "expected_points": expected_points,
+        "effective_lap": 100.0 * REF_LAP_S / expected_points if expected_points > 0 else float("inf"),
+        "median": float(np.median(finished)) if len(finished) else None,
+        "best": float(finished.min()) if len(finished) else None,
     }
 
 
@@ -232,15 +308,15 @@ def main(argv=None):
             if n % 25 == 0:
                 print(f"  {n}/{args.candidates}  ({time.perf_counter()-started:.0f}s)")
 
-    viable = [r for r in rows if np.isfinite(r["expected_best_of_3"])]
-    viable.sort(key=lambda r: r["expected_best_of_3"])
+    viable = [r for r in rows if np.isfinite(r["effective_lap"])]
+    viable.sort(key=lambda r: r["effective_lap"])
     print(f"\n{len(viable)}/{len(rows)} candidates completed at least one rollout, "
           f"{time.perf_counter()-started:.0f}s total\n")
 
     head = f"{'rank':>4} {'E[best3]':>9} {'median':>7} {'best':>7} {'compl':>6} {'DQ3':>6}  config"
     print(head)
     for rank, r in enumerate(viable[: args.top], 1):
-        cfg = (f"margin={r['margin']:.2f} grip={r['grip']:.2f} vmax={r['v_max']:.1f} "
+        cfg = (f"margin={r['margin']:.3f} grip={r['grip']:.2f} vmax={r['v_max']:.1f} "
                f"tau={r['tau_preview']:.2f} kc={r['k_cross']:.1f} kh={r['k_heading']:.1f} "
                f"lift={r['lift_band']:.2f} bg={r['brake_gain']:.2f}")
         print(f"{rank:>4} {r['expected_best_of_3']:>9.3f} {r['median']:>7.3f} "
@@ -266,12 +342,14 @@ def _write_params(path, r):
             "# under model error, sensor noise, actuation latency and start jitter.\n"
             f"# E[best of 3] {r['expected_best_of_3']:.3f} s/lap, median "
             f"{r['median']:.3f}, completion {r['completion']*100:.0f}%,\n"
-            f"# chance all three judged runs fail: {r['p_all_three_fail']*100:.2f}%\n"
+            f"# chance all three judged runs fail: "
+            f"{r.get('p_event_zero', r.get('p_all_three_fail', float('nan')))*100:.2f}%\n"
+            f"# effective lap (expected points as seconds): {r['effective_lap']:.3f}\n"
             "#\n"
-            f"# REQUIRES the racing line regenerated at margin {r['margin']:.2f}:\n"
+            f"# REQUIRES the racing line regenerated at margin {r['margin']:.3f}:\n"
             "#   python3 -m team_driver.tools.build_raceline --map maps/icra26_compete \\\n"
             "#     --centreline maps/icra26_compete_centerline.csv \\\n"
-            f"#     --out maps/icra26_compete_raceline.csv --margin {r['margin']:.2f}\n"
+            f"#     --out maps/icra26_compete_raceline.csv --margin {r['margin']:.3f}\n"
             "driver:\n  ros__parameters:\n"
             f"    line:\n      grip_fraction: {r['grip']:.3f}\n      v_max: {r['v_max']:.2f}\n"
             f"    pursuit:\n      tracker: \"feedforward\"\n"

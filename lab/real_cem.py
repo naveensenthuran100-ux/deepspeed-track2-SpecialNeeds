@@ -55,6 +55,9 @@ SPACE = {
     "pursuit.k_heading":        (0.30, 2.00, 0.842),
     "pursuit.k_cross":          (0.50, 4.00, 1.958),
     "pursuit.curvature_cap":    (0.50, 1.40, 1.011),
+    # Full throttle only below this lateral load (m/s^2). 12 is effectively
+    # off for every candidate driven before it existed.
+    "speed.full_throttle_max_lat": (2.0, 12.0, 12.0),
 }
 LINES = ["/hackathon/lab/lines/mt_k1.2.csv",            # best clean real run: 11.75 mean
          "/hackathon/lab/shortlist/cem/raceline_m0300.csv",
@@ -151,7 +154,8 @@ def main():
         elites = [c for c in sorted(seen.values(), key=lambda c: c.score)[: a.elite]
                   if c.score < FAIL]
         if elites:
-            U = np.array([(np.array([c.params[k] for k in keys]) - lo) / (hi - lo) for c in elites])
+            U = np.array([(np.array([c.params.get(k, SPACE[k][2]) for k in keys]) - lo) / (hi - lo)
+                          for c in elites])
             mean = U.mean(axis=0)
             std = np.maximum(U.std(axis=0), 0.05)
             counts = np.array([sum(c.params["line.raceline_csv"] == l for c in elites) for l in LINES], float)
@@ -193,7 +197,8 @@ def main():
         pool = sorted(fresh + elites, key=lambda c: c.score)
         elites = [c for c in pool[: a.elite] if c.score < FAIL]
         if elites:
-            U = np.array([(np.array([c.params[k] for k in keys]) - lo) / (hi - lo) for c in elites])
+            U = np.array([(np.array([c.params.get(k, SPACE[k][2]) for k in keys]) - lo) / (hi - lo)
+                          for c in elites])
             mean = 0.6 * U.mean(axis=0) + 0.4 * mean
             std = np.maximum(0.6 * U.std(axis=0) + 0.4 * std, 0.04)
             counts = np.array([sum(c.params["line.raceline_csv"] == l for c in elites) for l in LINES], float)

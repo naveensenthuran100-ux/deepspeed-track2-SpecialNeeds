@@ -127,6 +127,11 @@ driver:
       # clipped to 6. Above 12 it makes no measurable difference.
       v_max: 12.0
 
+      # Share grip between cornering and braking/accelerating in the speed
+      # profile (core/profile.py). Without it the profile brakes at the full
+      # limit right up to a corner it also takes at the full lateral limit.
+      friction_circle: false
+
     # ---- path tracking ---------------------------------------------------
     pursuit:
       # Lookahead is min + k * speed, then capped at curvature_cap / |kappa|.

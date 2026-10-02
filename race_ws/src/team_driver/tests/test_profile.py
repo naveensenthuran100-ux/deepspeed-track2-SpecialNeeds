@@ -113,3 +113,26 @@ def test_friction_circle_keeps_the_cornering_speed():
     shared = speed_profile(kappa, s, v, v_max=12.0, total_length=40.1, friction_circle=True)
     apex = (s > 21.0) & (s < 23.0)
     assert np.allclose(shared[apex], np.sqrt(v.a_lat_max / 1.0), rtol=0.02)
+
+
+def test_fast_corner_grip_lifts_only_the_open_corners():
+    """A wide bend (R 4 m) gets the fast grip; a hairpin (R 0.8 m) keeps the base."""
+    s = np.linspace(0.0, 60.0, 601)
+    kappa = np.where((s > 10) & (s < 16), 0.25, np.where((s > 35) & (s < 38), 1.25, 0.0))
+    v = Vehicle.default()
+    base = speed_profile(kappa, s, v, grip_fraction=1.0, v_max=15.0, total_length=60.1)
+    fast = speed_profile(kappa, s, v, grip_fraction=1.0, v_max=15.0, total_length=60.1,
+                         grip_fraction_fast=1.5, fast_radius=2.0)
+    wide = (s > 12) & (s < 14)
+    tight = (s > 36) & (s < 37)
+    assert np.all(fast[wide] > base[wide] + 0.1)
+    assert np.allclose(fast[tight], base[tight])
+
+
+def test_fast_corner_grip_off_by_default_changes_nothing():
+    s = np.linspace(0.0, 40.0, 401)
+    kappa = np.where((s > 20.0) & (s < 24.0), 0.3, 0.0)
+    v = Vehicle.default()
+    assert np.allclose(speed_profile(kappa, s, v, v_max=12.0, total_length=40.1),
+                       speed_profile(kappa, s, v, v_max=12.0, total_length=40.1,
+                                     grip_fraction_fast=0.0, fast_radius=2.0))

@@ -132,6 +132,12 @@ driver:
       # limit right up to a corner it also takes at the full lateral limit.
       friction_circle: true
 
+      # Grip fraction for corners of radius >= fast_radius (0.0 = same as
+      # grip_fraction). The tight hairpins are steering-lock-limited, so the
+      # single grip setting is set by them; the open corners need not be.
+      grip_fraction_fast: 0.0
+      fast_radius: 2.0
+
     # ---- path tracking ---------------------------------------------------
     pursuit:
       # Lookahead is min + k * speed, then capped at curvature_cap / |kappa|.

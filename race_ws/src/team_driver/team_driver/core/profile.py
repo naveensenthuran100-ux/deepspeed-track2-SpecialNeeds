@@ -36,6 +36,8 @@ def speed_profile(
     total_length=None,
     rounds: int = 2,
     friction_circle: bool = False,
+    grip_fraction_fast: float = 0.0,
+    fast_radius: float = 2.0,
 ):
     """Target speed at every sample of a closed path.
 
@@ -52,6 +54,12 @@ def speed_profile(
             assuming the closing segment matches the mean spacing.
         rounds: forward/backward sweeps. Two converges the wrap; more is
             harmless and costs microseconds.
+        grip_fraction_fast: grip fraction for corners of radius >= fast_radius
+            (0 = same as grip_fraction). Measured on the real car, the tight
+            hairpins are limited by STEERING LOCK, not grip, so the single
+            grip setting is set by them - and the open corners, which the
+            tyres (~9 m/s^2) could take far faster, inherit their caution.
+        fast_radius: the radius, in metres, from which grip_fraction_fast applies.
         friction_circle: share grip between cornering and accelerating or
             braking, a_x <= a_x_max * sqrt(1 - (v^2 k / a_lat)^2). Without it
             the profile brakes at a_brake_max right up to a corner it also
@@ -66,7 +74,10 @@ def speed_profile(
         return np.zeros(0)
 
     ceiling = float(vehicle.v_max if v_max is None else v_max)
-    lateral = max(float(vehicle.a_lat_max) * float(grip_fraction), _EPS)
+    lateral = np.full(count, max(float(vehicle.a_lat_max) * float(grip_fraction), _EPS))
+    if grip_fraction_fast > 0.0:
+        fast = kappa * float(fast_radius) <= 1.0           # radius >= fast_radius
+        lateral[fast] = max(float(vehicle.a_lat_max) * float(grip_fraction_fast), _EPS)
 
     # 1. the grip limit. Straight sections have zero curvature and would
     # divide by zero, so they take the ceiling directly.
@@ -78,11 +89,11 @@ def speed_profile(
     accel = float(vehicle.a_accel_max)
     brake = float(vehicle.a_brake_max)
 
-    def share(limit, v, k):
+    def share(limit, v, k, lat):
         """Longitudinal acceleration left over at speed v on curvature k."""
         if not friction_circle:
             return limit
-        used = min(v * v * k / lateral, 1.0)
+        used = min(v * v * k / lat, 1.0)
         return limit * np.sqrt(max(1.0 - used * used, 0.0))
 
     for _ in range(max(int(rounds), 1)):
@@ -90,7 +101,7 @@ def speed_profile(
         for i in range(count):
             j = (i + 1) % count
             reachable = np.sqrt(speeds[i] ** 2
-                                + 2.0 * share(accel, speeds[i], kappa[i]) * segments[i])
+                                + 2.0 * share(accel, speeds[i], kappa[i], lateral[i]) * segments[i])
             if speeds[j] > reachable:
                 speeds[j] = reachable
 
@@ -98,7 +109,7 @@ def speed_profile(
         for i in range(count - 1, -1, -1):
             j = (i + 1) % count
             survivable = np.sqrt(speeds[j] ** 2
-                                 + 2.0 * share(brake, speeds[j], kappa[j]) * segments[i])
+                                 + 2.0 * share(brake, speeds[j], kappa[j], lateral[j]) * segments[i])
             if speeds[i] > survivable:
                 speeds[i] = survivable
 

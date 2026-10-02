@@ -58,7 +58,11 @@ SPACE = {
 }
 LINES = ["/hackathon/lab/lines/mt_k1.2.csv",            # best clean real run: 11.75 mean
          "/hackathon/lab/shortlist/cem/raceline_m0300.csv",
-         "/hackathon/lab/lines/mt_k1.3.csv"]
+         "/hackathon/lab/lines/mt_k1.3.csv",
+         # More room at the two corner exits where EVERY collision happened
+         # (s=32.5 and s=37.3, car ~0.3 m wide on exit): 0.35/0.30 m margin.
+         "/hackathon/lab/lines/mt_k1.2_m0.35.csv",
+         "/hackathon/lab/lines/mt_k1.3_m0.30.csv"]
 FAIL = 30.0          # s/lap charged to a failed or disqualified run
 
 
@@ -125,7 +129,7 @@ def main():
     lo = np.array([SPACE[k][0] for k in keys]); hi = np.array([SPACE[k][1] for k in keys])
     mean = (np.array([SPACE[k][2] for k in keys]) - lo) / (hi - lo)
     std = np.full(len(keys), 0.12)
-    line_p = np.array([0.6, 0.2, 0.2])
+    line_p = np.full(len(LINES), 1.0 / len(LINES))
     deadline = time.time() + a.hours * 3600
     elites, cid, gen, best_ever = [], 0, 0, None
     os.makedirs(os.path.dirname(LOG), exist_ok=True)

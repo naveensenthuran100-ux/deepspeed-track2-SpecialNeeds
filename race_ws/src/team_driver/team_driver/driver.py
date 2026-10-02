@@ -37,6 +37,7 @@ from std_msgs.msg import Float32
 from visualization_msgs.msg import Marker, MarkerArray
 
 from team_driver.core.build import load_racing_stack
+from team_driver.core.latency import predict_pose
 from team_driver.core.lidar import beam_angles
 from team_driver.core.params import ALL_GROUPS, build_configs
 from team_driver.core.planner import Planner
@@ -82,6 +83,10 @@ class Driver(Node):
         # How old the pose may be before we stop believing it, in simulated
         # seconds. Ten frames at 40 Hz.
         self.declare_parameter("pose_timeout_s", 0.25)
+        # Latency compensation (core/latency.py). Off by default: when on, the
+        # pose is projected forward by its age at the scan plus latency_s.
+        self.declare_parameter("pose.extrapolate", False)
+        self.declare_parameter("pose.latency_s", 0.0)
         for group in ALL_GROUPS:
             for name, (_, default) in group.items():
                 self.declare_parameter(name, default)
@@ -111,6 +116,9 @@ class Driver(Node):
         self.position = None
         self.yaw = None
         self.speed = 0.0
+        self.yaw_rate = 0.0
+        self.extrapolate = bool(self.get_parameter("pose.extrapolate").value)
+        self.latency_s = float(self.get_parameter("pose.latency_s").value)
         self._pose_stamp = None
 
         self._angles = None
@@ -184,6 +192,7 @@ class Driver(Node):
             2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
         )
         self.speed = math.hypot(msg.twist.twist.linear.x, msg.twist.twist.linear.y)
+        self.yaw_rate = float(msg.twist.twist.angular.z)
 
     def ips_callback(self, msg):
         """Position alone. /odom carries this plus velocity, so it wins when both
@@ -232,6 +241,8 @@ class Driver(Node):
                     "pose is stale - falling back to reactive mode. "
                     "Is /odom still publishing?")
                 self._warned_stale = True
+            if position is not None and self.extrapolate:
+                position, yaw = self._project(position, yaw, self._stamp_of(scan))
             result = self.planner.step(
                 scan.ranges, angles, position, yaw, self.speed, dt
             )
@@ -251,6 +262,15 @@ class Driver(Node):
                 self.get_logger().warn(
                     f"control step took {elapsed * 1e3:.1f} ms of a 25 ms budget"
                 )
+
+    def _project(self, position, yaw, now):
+        """Where the car will be when this command lands: pose age + latency_s."""
+        age = 0.0
+        if now is not None and self._pose_stamp is not None:
+            age = min(max(now - self._pose_stamp, 0.0), 0.1)
+        x, y, yaw = predict_pose(position[0], position[1], yaw, self.speed, self.yaw_rate,
+                                 age + self.latency_s)
+        return (x, y), yaw
 
     def _angles_for(self, scan):
         """Beam angles, rebuilt only when the scan's geometry changes."""

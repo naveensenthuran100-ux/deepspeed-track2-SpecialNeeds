@@ -38,6 +38,7 @@ def speed_profile(
     friction_circle: bool = False,
     grip_fraction_fast: float = 0.0,
     fast_radius: float = 2.0,
+    fast_buffer_m: float = 1.0,
 ):
     """Target speed at every sample of a closed path.
 
@@ -60,6 +61,11 @@ def speed_profile(
             grip setting is set by them - and the open corners, which the
             tyres (~9 m/s^2) could take far faster, inherit their caution.
         fast_radius: the radius, in metres, from which grip_fraction_fast applies.
+        fast_buffer_m: no fast grip within this distance of a tighter corner.
+            Measured on the real car: a hairpin EXIT (R 2.1 m) fell inside the
+            fast zone, the car accelerated toward the fast target while still
+            at full lock at the apex, where the saturated front tyres hold only
+            ~5 m/s^2, ran wide and hit the outer wall.
         friction_circle: share grip between cornering and accelerating or
             braking, a_x <= a_x_max * sqrt(1 - (v^2 k / a_lat)^2). Without it
             the profile brakes at a_brake_max right up to a corner it also
@@ -76,8 +82,17 @@ def speed_profile(
     ceiling = float(vehicle.v_max if v_max is None else v_max)
     lateral = np.full(count, max(float(vehicle.a_lat_max) * float(grip_fraction), _EPS))
     if grip_fraction_fast > 0.0:
-        fast = kappa * float(fast_radius) <= 1.0           # radius >= fast_radius
-        lateral[fast] = max(float(vehicle.a_lat_max) * float(grip_fraction_fast), _EPS)
+        tight = kappa * float(fast_radius) > 1.0            # radius < fast_radius
+        steps = np.diff(arc)
+        spacing = float(np.mean(steps)) if len(steps) else 1.0
+        reach = int(np.ceil(max(float(fast_buffer_m), 0.0) / max(spacing, _EPS)))
+        if reach > 0 and tight.any():
+            # Grow every tight zone by `reach` samples each way, around the loop.
+            grown = tight.copy()
+            for shift in range(1, reach + 1):
+                grown |= np.roll(tight, shift) | np.roll(tight, -shift)
+            tight = grown
+        lateral[~tight] = max(float(vehicle.a_lat_max) * float(grip_fraction_fast), _EPS)
 
     # 1. the grip limit. Straight sections have zero curvature and would
     # divide by zero, so they take the ceiling directly.

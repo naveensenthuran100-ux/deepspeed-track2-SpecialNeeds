@@ -137,6 +137,9 @@ driver:
       # single grip setting is set by them; the open corners need not be.
       grip_fraction_fast: 0.0
       fast_radius: 2.0
+      # No fast grip within this distance of a tighter corner, so exits are
+      # driven at the hairpin's caution until the car has straightened.
+      fast_buffer_m: 1.0
 
     # ---- path tracking ---------------------------------------------------
     pursuit:

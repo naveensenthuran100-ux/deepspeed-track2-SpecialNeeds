@@ -136,3 +136,18 @@ def test_fast_corner_grip_off_by_default_changes_nothing():
     assert np.allclose(speed_profile(kappa, s, v, v_max=12.0, total_length=40.1),
                        speed_profile(kappa, s, v, v_max=12.0, total_length=40.1,
                                      grip_fraction_fast=0.0, fast_radius=2.0))
+
+
+def test_fast_grip_keeps_a_buffer_around_tight_corners():
+    """Just past a hairpin the speed must match the no-fast-grip profile: the
+    buffer keeps the exit at the hairpin's caution."""
+    s = np.linspace(0.0, 60.0, 601)
+    kappa = np.where((s > 30) & (s < 33), 1.25, 0.05)
+    v = Vehicle.default()
+    base = speed_profile(kappa, s, v, grip_fraction=1.0, v_max=15.0, total_length=60.1)
+    fast = speed_profile(kappa, s, v, grip_fraction=1.0, v_max=15.0, total_length=60.1,
+                         grip_fraction_fast=1.5, fast_radius=2.0, fast_buffer_m=1.0)
+    exit_zone = (s > 33.0) & (s < 33.9)
+    far = (s > 45) & (s < 50)
+    assert np.allclose(fast[exit_zone], base[exit_zone])
+    assert np.all(fast[far] >= base[far] - 1e-9)

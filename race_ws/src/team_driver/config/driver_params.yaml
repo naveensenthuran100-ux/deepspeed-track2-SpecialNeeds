@@ -61,8 +61,8 @@ driver:
 
     speed:
       # Feed-forward does most of the work; these only trim it.
-      kp: 0.1013
-      ki: 0.2979
+      kp: 0.1185
+      ki: 0.2354
 
       # Hard clamp on the integral, in throttle units. One slow corner is
       # otherwise enough to hold the throttle open down the next straight.
@@ -73,28 +73,28 @@ driver:
       # late and cost about 0.2 s a lap in tuning. The car has no ABS, so a
       # negative throttle locks the wheels - but arriving at the corner
       # too fast is the more expensive failure.
-      lift_band: 0.2706
+      lift_band: 0.1335
 
       # Throttle per m/s of excess once past the lift band. The speed
       # profile plans braking at a_brake_max, so this must be high enough
       # that the controller can actually ask for it.
-      brake_gain: 0.9503
+      brake_gain: 0.9632
 
       # Below the target by more than this, in m/s, the throttle goes to 1.0.
       # 0 disables it. The speed profile plans every acceleration at the
       # traction limit, so under-target is lost time; feed-forward plus a
       # trim creeps up on the target instead of driving at it.
-      full_throttle_band: 0.4113
+      full_throttle_band: 0.4234
 
       # Read the target speed this many seconds of travel ahead of the car,
       # covering actuation and pose latency so braking starts on time.
       # 0 reads it at the car's own position.
-      preview_s: 0.1051
+      preview_s: 0.1264
 
       # Full-throttle band only while lateral load v^2*|k| on the line is
       # below this, m/s^2 (0 = no limit). Prevents power-on understeer on
       # corner exits, where every real collision happened.
-      full_throttle_max_lat: 5.0
+      full_throttle_max_lat: 3.7412
 
     # ---- the racing line -------------------------------------------------
     line:
@@ -116,7 +116,7 @@ driver:
       # it was an artifact of brake_gain being 0.30 in PlannerConfig while
       # the parameter map said 1.0, so every offline run braked at a third
       # authority and arrived at corners too fast. Fixed; the cliff is gone.
-      grip_fraction: 1.073
+      grip_fraction: 1.1085
 
       # Ceiling on the profile's target speed, m/s. NOT a safety limit - the
       # grip-limited cornering speed already handles that - just a cap so a
@@ -135,11 +135,11 @@ driver:
       # Grip fraction for corners of radius >= fast_radius (0.0 = same as
       # grip_fraction). The tight hairpins are steering-lock-limited, so the
       # single grip setting is set by them; the open corners need not be.
-      grip_fraction_fast: 0.0
+      grip_fraction_fast: 1.399
       fast_radius: 2.0
       # No fast grip within this distance of a tighter corner, so exits are
       # driven at the hairpin's caution until the car has straightened.
-      fast_buffer_m: 1.0
+      fast_buffer_m: 1.378
 
     # ---- path tracking ---------------------------------------------------
     pursuit:
@@ -149,7 +149,7 @@ driver:
       max_lookahead: 2.0
       # Aiming further ahead than the corner radius tracks a chord across the
       # corner instead of round it. This circuit turns at about 1.1 m.
-      curvature_cap: 1.006
+      curvature_cap: 0.9181
 
       # Which tracker: "feedforward" reads the steering angle out of the
       # path's curvature a preview ahead, so the actuator is given its lag up
@@ -157,11 +157,11 @@ driver:
       # pursuit, which only turns once error already exists - on 0.83 m
       # corners that arrives after the corner does.
       tracker: "feedforward"
-      tau_preview: 0.1578  # seconds of travel to read curvature ahead
-      min_preview: 0.6754
+      tau_preview: 0.1516  # seconds of travel to read curvature ahead
+      min_preview: 0.6757
       max_preview: 2.5
-      k_heading: 0.7898  # weight on heading error
-      k_cross: 1.484  # weight on cross-track error, divided by speed
+      k_heading: 0.6614  # weight on heading error
+      k_cross: 1.2391  # weight on cross-track error, divided by speed
 
     # ---- when to give up on the line ------------------------------------
     mode:

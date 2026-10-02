@@ -140,6 +140,26 @@ def fit_grip(speeds, radii, lateral) -> float:
     return float(np.percentile(lateral, LIMIT_PERCENTILE))
 
 
+def linear_map(throttles, speeds) -> list:
+    """[c1, 0]: the mean of v/u - for a sweep too short to support a curve.
+
+    The 2026-09 sweep has four usable points (0.08-0.25, where the car still
+    ran free; above that it was hitting walls). Their ratios are 24.9, 24.5,
+    24.7 and 24.1 m/s per unit throttle - a straight line through the origin,
+    and nothing in the data supports bending it.
+    """
+    u = np.asarray(throttles, dtype=np.float64).ravel()
+    v = np.asarray(speeds, dtype=np.float64).ravel()
+    order = np.argsort(u)
+    u, v = u[order], v[order]
+    # A free-running car's steady speed only rises with throttle. A point
+    # slower than one at lower throttle was in contact with something - in
+    # the 2026-09 sweep that removes 0.20, 0.30 and 0.35 - so drop it.
+    best = np.maximum.accumulate(v)
+    keep = (u > 0.0) & (v >= best)
+    return [round(float(np.mean(v[keep] / u[keep])), 1), 0.0]
+
+
 def fit_vehicle(log: Dict, base: Optional[Vehicle] = None) -> Vehicle:
     """A Vehicle from whatever phases the log contains.
 
@@ -221,9 +241,28 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--log", required=True, help="CSV written by sysid_drive")
     parser.add_argument("--out", required=True, help="where to write vehicle.json")
+    parser.add_argument("--sweep-max", type=float, default=None,
+                        help="drop throttle-sweep points above this throttle (the car hit walls)")
+    parser.add_argument("--map-only", action="store_true",
+                        help="refit only the throttle map (linear, through the origin) into "
+                             "--base, keeping every other value")
+    parser.add_argument("--base", help="vehicle.json to update with --map-only")
     args = parser.parse_args(argv)
 
     log = load_log(args.log)
+    if args.sweep_max is not None and "throttle_sweep" in log:
+        u, v = log["throttle_sweep"]
+        keep = u <= args.sweep_max
+        log["throttle_sweep"] = (u[keep], v[keep])
+    if args.map_only:
+        vehicle = Vehicle.load(args.base) if args.base else Vehicle.default()
+        before = list(vehicle.throttle_v_coeffs)
+        vehicle.throttle_v_coeffs = linear_map(*log["throttle_sweep"])
+        vehicle.v_max = vehicle.speed_for_throttle(1.0)
+        vehicle.save(args.out)
+        print(f"throttle map {before} -> {vehicle.throttle_v_coeffs} "
+              f"from {len(log['throttle_sweep'][0])} sweep points; wrote {args.out}")
+        return 0
     if not log:
         print(f"{args.log} contains no recognised phases; nothing fitted.")
         return 1

@@ -165,3 +165,17 @@ def test_grip_is_reported_as_a_lower_bound_when_never_saturated():
     plateaued = np.minimum(speeds ** 2 / 1.5, 8.1)  # clearly levels off
     assert grip_saturated(rising) is False
     assert grip_saturated(plateaued) is True
+
+
+def test_linear_map_is_the_mean_ratio_through_the_origin():
+    """The 2026-09 sweep's four free-running points give the shipped 24.6."""
+    from team_driver.tools.sysid import linear_map
+    assert linear_map([0.08, 0.12, 0.16, 0.25], [1.993, 2.9404, 3.9522, 6.033]) == [24.6, 0.0]
+
+
+def test_linear_map_drops_points_where_the_car_was_in_contact():
+    """The full 2026-09 sweep, contact points included, still gives 24.6."""
+    from team_driver.tools.sysid import linear_map
+    sweep_u = [0.08, 0.12, 0.16, 0.20, 0.25, 0.30, 0.35]
+    sweep_v = [1.993, 2.9404, 3.9522, 3.1683, 6.033, 1.7774, 1.5887]
+    assert linear_map(sweep_u, sweep_v) == [24.6, 0.0]

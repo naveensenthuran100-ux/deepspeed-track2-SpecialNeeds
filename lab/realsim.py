@@ -243,6 +243,11 @@ class Bench(Node):
             else:
                 ignored_since = None
         self.recording = False
+        # Count collisions NOW, while the run is the run. Once the driver is
+        # stopped the car coasts at racing speed with zero throttle into the
+        # next wall, and counting that charged every candidate a crash no
+        # judged run would contain.
+        raced_collisions = (self.v["collisions"] or coll0) - coll0
         self.stop_driver()
 
         # Timing quality. A Unity window that macOS throttles (App Nap, display
@@ -262,7 +267,7 @@ class Bench(Node):
             elif result["odom_gaps_100ms"] > 3:
                 status += "+BAD_TIMING"
         result["status"] = status
-        result["collisions"] = (self.v["collisions"] or coll0) - coll0
+        result["collisions"] = raced_collisions
         flying = result["lap_times"][1:]
         result["best"] = min(flying) if flying else None
         result["mean_flying"] = round(sum(flying) / len(flying), 3) if flying else None

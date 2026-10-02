@@ -84,9 +84,12 @@ def score_run(result, laps):
     coll = result.get("collisions") or 0
     if result.get("status") != "COMPLETE" or len(flying) < laps - 1:
         return FAIL
+    # Every collision counts towards the DQ limit (rule 16), projected to the
+    # 12 laps actually driven; only those in timed laps cost time (rule 18).
     if coll * 12.0 / laps > 10.0:
         return FAIL
-    return float(np.mean(flying)) + 10.0 * coll / len(flying)
+    timed = sum(result.get("lap_collisions", [])[1:])
+    return float(np.mean(flying)) + 10.0 * timed / len(flying)
 
 
 class Cand:

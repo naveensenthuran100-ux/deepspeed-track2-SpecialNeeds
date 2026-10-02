@@ -58,6 +58,11 @@ SPACE = {
     # Full throttle only below this lateral load (m/s^2). 12 is effectively
     # off for every candidate driven before it existed.
     "speed.full_throttle_max_lat": (2.0, 12.0, 5.0),
+    # Open corners (R >= fast_radius) at more grip than the steering-limited
+    # hairpins; no fast grip within fast_buffer_m of a tight corner.
+    # Real sim: laps of 10.6-10.9 s, collisions from tracking at speed.
+    "line.grip_fraction_fast":  (1.00, 1.70, 1.40),
+    "line.fast_buffer_m":       (0.50, 2.50, 1.50),
 }
 LINES = ["/hackathon/lab/lines/mt_k1.2.csv",            # best clean real run: 11.75 mean
          "/hackathon/lab/shortlist/cem/raceline_m0300.csv",

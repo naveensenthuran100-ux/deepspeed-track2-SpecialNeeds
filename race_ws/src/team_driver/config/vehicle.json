@@ -10,10 +10,10 @@
   "max_steer_rate": 3.2,
   "measured": true,
   "throttle_v_coeffs": [
-    39.80279257524765,
-    -19.901396287623825
+    24.6,
+    0.0
   ],
-  "v_max": 19.901396287623825,
+  "v_max": 24.6,
   "wheel_radius": 0.059,
   "wheelbase": 0.324,
   "width": 0.27

@@ -85,3 +85,36 @@ def test_parameter_defaults_match_the_dataclass_defaults():
                     f"{name}: map={default} dataclass={planner_defaults[field]}")
 
     assert mismatches == [], "parameter defaults have drifted: " + "; ".join(mismatches)
+
+
+def test_every_shipped_value_has_the_type_the_driver_declares():
+    """ROS 2 refuses a parameter whose type differs from its declaration: the
+    shipped yaml once said `v_max: 18` (INTEGER) for a DOUBLE and the node died
+    on start - a DNF on judging day. Every value must match its declared type."""
+    import ast
+    import pathlib
+    import re
+
+    import yaml
+
+    from team_driver.core.params import ALL_GROUPS
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    shipped = yaml.safe_load((root / "config" / "driver_params.yaml").read_text())
+    declared = {name: default for group in ALL_GROUPS for name, (_, default) in group.items()}
+    source = (root / "team_driver" / "driver.py").read_text()
+    for name, default in re.findall(r'declare_parameter\("([^"]+)",\s*([^)]+)\)', source):
+        declared[name] = ast.literal_eval(default)
+
+    def flatten(d, pre=""):
+        for k, v in d.items():
+            if isinstance(v, dict):
+                yield from flatten(v, pre + k + ".")
+            else:
+                yield pre + k, v
+
+    for name, value in flatten(shipped["driver"]["ros__parameters"]):
+        assert name in declared, f"{name} is in driver_params.yaml but the driver never declares it"
+        assert type(value) is type(declared[name]), (
+            f"{name}: yaml has {value!r} ({type(value).__name__}), "
+            f"driver declares {type(declared[name]).__name__} - the node would refuse to start")

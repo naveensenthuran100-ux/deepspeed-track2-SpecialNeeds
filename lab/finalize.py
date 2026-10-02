@@ -39,7 +39,11 @@ def edit_yaml(text, dotted, value):
     if isinstance(value, bool):
         literal = "true" if value else "false"
     elif isinstance(value, float):
-        literal = f"{value:.4g}"
+        # ALWAYS with a decimal point: ROS 2 reads `18` as INTEGER, the driver
+        # declares a DOUBLE, and the node refuses to start - a DNF.
+        literal = f"{value:.6g}"
+        if not any(c in literal for c in ".en"):
+            literal += ".0"
     else:
         literal = str(value)
     lines = text.split("\n")

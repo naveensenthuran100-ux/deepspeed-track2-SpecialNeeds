@@ -61,8 +61,8 @@ driver:
 
     speed:
       # Feed-forward does most of the work; these only trim it.
-      kp: 0.05
-      ki: 0.15
+      kp: 0.1013
+      ki: 0.2979
 
       # Hard clamp on the integral, in throttle units. One slow corner is
       # otherwise enough to hold the throttle open down the next straight.
@@ -73,28 +73,28 @@ driver:
       # late and cost about 0.2 s a lap in tuning. The car has no ABS, so a
       # negative throttle locks the wheels - but arriving at the corner
       # too fast is the more expensive failure.
-      lift_band: 0.15
+      lift_band: 0.2706
 
       # Throttle per m/s of excess once past the lift band. The speed
       # profile plans braking at a_brake_max, so this must be high enough
       # that the controller can actually ask for it.
-      brake_gain: 1.0
+      brake_gain: 0.9503
 
       # Below the target by more than this, in m/s, the throttle goes to 1.0.
       # 0 disables it. The speed profile plans every acceleration at the
       # traction limit, so under-target is lost time; feed-forward plus a
       # trim creeps up on the target instead of driving at it.
-      full_throttle_band: 0.0
+      full_throttle_band: 0.4113
 
       # Read the target speed this many seconds of travel ahead of the car,
       # covering actuation and pose latency so braking starts on time.
       # 0 reads it at the car's own position.
-      preview_s: 0.0
+      preview_s: 0.1051
 
       # Full-throttle band only while lateral load v^2*|k| on the line is
       # below this, m/s^2 (0 = no limit). Prevents power-on understeer on
       # corner exits, where every real collision happened.
-      full_throttle_max_lat: 0.0
+      full_throttle_max_lat: 5.0
 
     # ---- the racing line -------------------------------------------------
     line:
@@ -116,7 +116,7 @@ driver:
       # it was an artifact of brake_gain being 0.30 in PlannerConfig while
       # the parameter map said 1.0, so every offline run braked at a third
       # authority and arrived at corners too fast. Fixed; the cliff is gone.
-      grip_fraction: 0.70
+      grip_fraction: 1.073
 
       # Ceiling on the profile's target speed, m/s. NOT a safety limit - the
       # grip-limited cornering speed already handles that - just a cap so a
@@ -125,12 +125,12 @@ driver:
       # It was 6.0, which quietly cost 1.6 s a lap at realistic grip: the
       # profile wants peaks near 14 m/s down the straights and was being
       # clipped to 6. Above 12 it makes no measurable difference.
-      v_max: 12.0
+      v_max: 18.0
 
       # Share grip between cornering and braking/accelerating in the speed
       # profile (core/profile.py). Without it the profile brakes at the full
       # limit right up to a corner it also takes at the full lateral limit.
-      friction_circle: false
+      friction_circle: true
 
     # ---- path tracking ---------------------------------------------------
     pursuit:
@@ -140,7 +140,7 @@ driver:
       max_lookahead: 2.0
       # Aiming further ahead than the corner radius tracks a chord across the
       # corner instead of round it. This circuit turns at about 1.1 m.
-      curvature_cap: 0.8
+      curvature_cap: 1.006
 
       # Which tracker: "feedforward" reads the steering angle out of the
       # path's curvature a preview ahead, so the actuator is given its lag up
@@ -148,11 +148,11 @@ driver:
       # pursuit, which only turns once error already exists - on 0.83 m
       # corners that arrives after the corner does.
       tracker: "feedforward"
-      tau_preview: 0.16      # seconds of travel to read curvature ahead
-      min_preview: 0.25
+      tau_preview: 0.1578  # seconds of travel to read curvature ahead
+      min_preview: 0.6754
       max_preview: 2.5
-      k_heading: 0.7         # weight on heading error
-      k_cross: 2.2           # weight on cross-track error, divided by speed
+      k_heading: 0.7898  # weight on heading error
+      k_cross: 1.484  # weight on cross-track error, divided by speed
 
     # ---- when to give up on the line ------------------------------------
     mode:
@@ -165,5 +165,5 @@ driver:
       block_min_horizon: 1.5
       block_samples: 8
       # Hysteresis in frames at 40 Hz: quick to duck, slow to commit back.
-      block_enter_frames: 3
+      block_enter_frames: 1000000
       block_exit_frames: 10

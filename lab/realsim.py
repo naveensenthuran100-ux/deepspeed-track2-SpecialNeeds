@@ -194,12 +194,12 @@ class Bench(Node):
         self.reset_car()
         if not self.sim_obeys():
             result["status"] = "SIM_IGNORING_COMMANDS"
-            return result
+            return self._save(result)
         self.rows = []
         if not self.start_driver(params_path, f"{OUT}/{tag}.driver.log"):
             result["status"] = "DRIVER_DID_NOT_START"
             self.stop_driver()
-            return result
+            return self._save(result)
 
         self.recording = True
         lap0, coll0 = self.v["lap"] or 0, self.v["collisions"] or 0
@@ -278,7 +278,11 @@ class Bench(Node):
             writer.writeheader()
             writer.writerows(self.rows)
         result["telemetry"] = tel
-        with open(f"{OUT}/{tag}.result.json", "w") as handle:
+        return self._save(result)
+
+    def _save(self, result):
+        """Every outcome gets a result file - an early failure most of all."""
+        with open(f"{OUT}/{result['tag']}.result.json", "w") as handle:
             json.dump(result, handle, indent=2)
         return result
 

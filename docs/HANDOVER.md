@@ -11,20 +11,31 @@ as an assumption. Read §4 before trusting any number.
 
 ## 0. Read this first — the overnight session of 2026-10-02/03
 
-### Where we are
+### Where we are — two configs, one decision
 
-Shipped config (`config/driver_params.yaml`, `config/vehicle.json`,
-`maps/icra26_compete_raceline.csv`), driven **exactly as judged** — no
-`--driver-params`, out lap + warm-up + 10 timed laps — on the real simulator:
+Both driven **exactly as judged** (shipped files, no `--driver-params`, out
+lap + warm-up + 10 timed laps) on the real simulator:
 
-```
-COMPLETE   collisions 0   best lap 11.266 s   10-lap total 113.53 s
-timed laps 11.36 11.31 11.41 11.36 11.40 11.37 11.38 11.35 11.27 11.34
-```
+| | best lap | 10-lap total | collisions per 12-lap run | commit |
+|---|---|---|---|---|
+| **c83 — fast (shipped at HEAD)** | **10.68–10.73 s** | **107.74 s** clean; 118.7 / 129.9 / 140.2 with 1–3 hits | 0, 2, 2, 3 — about 1 run in 4 clean | `e6a1ece` |
+| **c6 — safe** | 11.27 s | 113.53 s | 0 in every run (7 runs) | `d42e18b` |
 
-Was 12.588 s best (3 laps) on 2026-09-25. Result:
-`results/realsim/shipped_c6_12lap.result.json` (+ telemetry). Still to do:
-one official `./scripts/evaluate.sh` run for `results/submitted/`.
+The judges take the best of three runs. Expected score is higher for c83
+(~97 vs ~95 against a 10.7 s / 107.7 s leader) and its best lap alone likely
+takes the full 50; c6 never has a bad run. To ship c6:
+`git checkout d42e18b -- race_ws/src/team_driver/config/driver_params.yaml`
+(the line and vehicle files are identical; the newer open-corner keys fall
+back to their off defaults).
+
+Was 12.588 s best (3 laps) on 2026-09-25. Results in `results/realsim/`
+(`shipped_c83_12lap_*`, `val12_*`, `shipped_c6_12lap`). Still to do: one
+official `./scripts/evaluate.sh` run for `results/submitted/`.
+
+c83's collisions are spread over the lap — wherever the car drifts ~0.45 m
+at 6–7.5 m/s (s ≈ 2.6, 26.9) and at the corner-3 exit (s ≈ 37.3). Detuning
+(exit buffer 2.0 m, open-corner grip 1.30) did not remove them in 12-lap
+tests. The next lever is tracking at speed, not grip.
 
 ### The benchmark that matters
 

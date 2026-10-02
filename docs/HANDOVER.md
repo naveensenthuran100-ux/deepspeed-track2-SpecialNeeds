@@ -3,6 +3,99 @@
 Written 2026-09-25. Everything below is either measured or explicitly flagged
 as an assumption. Read §4 before trusting any number.
 
+> **§0 below (2026-10-03) supersedes §2, §4, §5 and §8.** They are kept
+> because the reasoning — including what turned out wrong — is interview
+> material.
+
+---
+
+## 0. Read this first — the overnight session of 2026-10-02/03
+
+### Where we are
+
+Shipped config (`config/driver_params.yaml`, `config/vehicle.json`,
+`maps/icra26_compete_raceline.csv`), driven **exactly as judged** — no
+`--driver-params`, out lap + warm-up + 10 timed laps — on the real simulator:
+
+```
+COMPLETE   collisions 0   best lap 11.266 s   10-lap total 113.53 s
+timed laps 11.36 11.31 11.41 11.36 11.40 11.37 11.38 11.35 11.27 11.34
+```
+
+Was 12.588 s best (3 laps) on 2026-09-25. Result:
+`results/realsim/shipped_c6_12lap.result.json` (+ telemetry). Still to do:
+one official `./scripts/evaluate.sh` run for `results/submitted/`.
+
+### The benchmark that matters
+
+**The world best on this exact circuit is 11.00 s** — MonacoF1, ICRA 2026
+RoboRacer Sim Racing, Phase 2 final (110.27 s for 10 laps, 0 collisions).
+[Results](https://autodrive-ecosystem.github.io/competitions/roboracer-sim-racing-icra-2026/).
+The sub-8 s laps people quote (VAUL 6.46 s, 7–8 s for most of the top 10)
+are from **Phase 1, the practice track** — a different circuit. NTU DeepSpeed
+appears in both tables. Against MonacoF1's times our shipped run scores
+≈ 48.8 + 48.6 = **97.4 / 100**.
+
+### What was measured, and what it overturned
+
+| Claim in §4/§5 | Measured on the real car | How |
+|---|---|---|
+| grip limit 5.57–7.24 m/s² | **≈ 9 m/s²** — the ladder measured our controller, not the tyres | IMU + actual steering, ~4,600 cornering samples, achieved/kinematic curvature ratio (`lab/physics.py`) |
+| throttle map v = 39.8u − 19.9u² | **v ≈ 24.6u** — ~60% too steep, so feed-forward under-throttled by ~38% | the clean `sysid.csv` sweep points (0.08–0.25) |
+| `a_accel/a_brake/a_coast` measured | **contaminated** — the "longitudinal" phase logs steering 0 while yaw rate says full lock (R ≈ 0.56 m), resetting every 0.65 s: a car circling into a wall | same file, rows 9–60 |
+| corners grip-limited | the two inner hairpins (s ≈ 30–37) are **steering-lock-limited**: full lock even on clean laps | actual steering feedback |
+| 7 s is reachable "at 1.5 g" | 7 s needs ~14.7 m/s² **and** ~10/12 m/s² accel/brake; the car has ~9 | ideal-profile model |
+
+Every collision in the high-speed runs was the car running **~0.3 m wide on
+a corner exit** (s = 32.5 and s = 37.3) — `lab/collisions.py`.
+
+### What changed in the driver (all with tests; 213 green)
+
+- `speed.full_throttle_band` — far under target → throttle 1.0. The profile
+  plans accelerations at the traction limit; feed-forward + a trim (the
+  integral is worth ≤ ki·0.30 = 0.045 throttle) crept up on them.
+- `speed.full_throttle_max_lat` — that band only below this lateral load,
+  against power-on understeer on exits.
+- `speed.preview_s` — target speed read ahead, covering actuation latency.
+- `line.friction_circle` — the profile shares grip between turning and
+  braking (`a_x ≤ a_x,max·√(1 − (a_y/a_y,max)²)`).
+- `tools/line_mintime.py` — racing line optimised for **lap time** with a
+  steering-authority curvature cap; wall clearance measured on the free-cell
+  distance field, so the grey outfield counts as wall and no line threads a
+  gap between ducts (rule 11). Corner-by-corner entry/apex/exit table.
+- `pose.extrapolate` / `pose.latency_s` — CTRV pose projection. **Tested, no
+  gain on the real car; off.**
+- LiDAR "blocked path" check disabled (`mode.block_enter_frames: 1000000`) —
+  a solo time trial has nothing to block the path; disabling it changed
+  nothing measurable. Follow-the-gap remains the fallback for pose loss.
+
+### Tooling (all in `lab/`, not shipped)
+
+| | |
+|---|---|
+| `realsim.py` + `rs.sh` | test bench on the real simulator through **one persistent bridge**; resets like the referee, times laps, records telemetry, flags stutter (`INVALID_TIMING`) and ignored commands |
+| `real_cem.py` | cross-entropy search run **on the real simulator** (`--resume`, `--restart-bridge-every`) |
+| `finalize.py --cid N` | ships a candidate into the config in place (comments survive) |
+| `physics.py`, `collisions.py`, `offsets.py`, `draw_track.py` | what the car physically did, where it hit, where it left the line |
+| `calib_real.py` | surrogate vs real runs — **9% optimistic, rank correlation 0.35**: do not optimise against the surrogate |
+
+### Operational gotchas (each cost an hour)
+
+1. **macOS throttles the Unity simulator** when its window isn't frontmost or
+   the display sleeps: odometry goes from ~17 ms to 100–370 ms bursts and every
+   config looks bad. `caffeinate -d -i -w <sim pid>`, keep it frontmost,
+   don't use the Mac during runs. `realsim.py` reports the gaps.
+2. **The bridge degrades over hours** (one core at 100%, odometry 17 → 40 ms).
+   Restart it (`lab/restart_bridge.sh`); the simulator reconnects by itself.
+3. **`evaluate.sh` restarts the bridge**, and after a restart the simulator
+   can keep publishing while ignoring every command — it once drove a stale
+   0.52 throttle into a wall for an 11-collision DQ. The bench checks that
+   the actual throttle follows the command before every run.
+4. **ROS 2 parameter types are strict**: `v_max: 18` is an INTEGER and the
+   driver declares a DOUBLE → the node refuses to start (DNF). Now tested.
+5. `pkill -f pattern` inside `bash -lc "..."` matches its own shell — use
+   `'[p]attern'`.
+
 ---
 
 ## 1. The competition, in one box

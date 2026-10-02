@@ -251,3 +251,21 @@ def test_speed_preview_wraps_across_the_start_line():
     planner = _step_profile_planner(speed_preview_s=1.0)
     result = planner.step(CLEAR, ANGLES, pose=(59.5, 0.0), yaw=0.0, speed=8.0, dt=0.025)
     assert np.isfinite(result.v_target)
+
+
+def test_full_throttle_held_back_while_cornering_hard():
+    """On a circle at 3 m/s with k = 1, lateral load is 9 m/s^2: above a 5 m/s^2
+    limit the full-throttle band must not fire; with no limit it does."""
+    theta = np.linspace(0.0, 2 * np.pi, 400, endpoint=False)
+    circle = Centreline(np.stack([np.cos(theta), np.sin(theta)], axis=1))
+    profile = np.full(400, 8.0)
+    pose, yaw = (1.0, 0.0), np.pi / 2
+
+    def throttle(limit):
+        planner = Planner(Vehicle.default(), PlannerConfig(full_throttle_band=0.5,
+                                                           full_throttle_max_lat=limit))
+        planner.load_path(circle, profile)
+        return planner.step(CLEAR, ANGLES, pose=pose, yaw=yaw, speed=3.0, dt=0.025).throttle
+
+    assert throttle(0.0) == pytest.approx(1.0)
+    assert throttle(5.0) < 1.0

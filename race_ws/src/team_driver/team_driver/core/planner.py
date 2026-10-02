@@ -62,6 +62,11 @@ class PlannerConfig:
     #: Read the target speed this many seconds of travel ahead of the car,
     #: to cover actuation and pose latency. 0 = at the car's own position.
     speed_preview_s: float = 0.0
+    #: Allow the full-throttle band only while lateral load v^2*|k| on the
+    #: line is below this, m/s^2. 0 = no limit. On the real car every
+    #: collision was the car running ~0.3 m wide on a corner EXIT: full power
+    #: while still turning overloads the tyres (power-on understeer).
+    full_throttle_max_lat: float = 0.0
 
     # Pure pursuit.
     k_lookahead: float = 0.35
@@ -143,6 +148,7 @@ class Planner:
 
         self.path: Optional[Centreline] = None
         self.profile: Optional[np.ndarray] = None
+        self._index: Optional[int] = None
 
         self.mode = GAP
         self._blocked_frames = 0
@@ -188,7 +194,11 @@ class Planner:
         pose_yaw = _valid_pose(pose, yaw)
         steer_rad, v_target, mode = self._decide(scan, angles, pose_yaw, speed)
 
-        throttle = self.speed_controller.step(v_target, speed, dt)
+        allow_full = True
+        limit = self.config.full_throttle_max_lat
+        if limit > 0.0 and mode == LINE and self._index is not None:
+            allow_full = speed * speed * abs(float(self.path.curvature[self._index])) < limit
+        throttle = self.speed_controller.step(v_target, speed, dt, allow_full=allow_full)
         return PlanResult(
             steer_norm=_clip_unit(self.vehicle.steer_to_norm(steer_rad)),
             throttle=_clip_unit(throttle),
@@ -202,6 +212,7 @@ class Planner:
 
         x, y, heading = pose_yaw
         index, offset = self.path.nearest((x, y))
+        self._index = index
         if offset > self.config.max_path_offset:
             # Not where we think we are, or no longer on the track. Either
             # way the line is not information any more.

@@ -70,8 +70,13 @@ class SpeedController:
         """Clear the integral. Call between runs, and on a mode change."""
         self.integral = 0.0
 
-    def step(self, v_target: float, v_measured: float, dt: float) -> float:
-        """One control step. Returns a throttle in [-1, 1]."""
+    def step(self, v_target: float, v_measured: float, dt: float,
+             allow_full: bool = True) -> float:
+        """One control step. Returns a throttle in [-1, 1].
+
+        `allow_full=False` suppresses the full-throttle band for this step -
+        the planner does that while the car is still loaded up in a corner.
+        """
         v_target = float(v_target)
         v_measured = float(v_measured)
         error = v_target - v_measured
@@ -84,7 +89,7 @@ class SpeedController:
             excess = -error - self.lift_band
             return _clip(-self.brake_gain * excess, -1.0, 0.0)
 
-        if self.full_throttle_band > 0.0 and error > self.full_throttle_band:
+        if allow_full and self.full_throttle_band > 0.0 and error > self.full_throttle_band:
             return 1.0
 
         feed_forward = self.vehicle.throttle_for_speed(v_target)

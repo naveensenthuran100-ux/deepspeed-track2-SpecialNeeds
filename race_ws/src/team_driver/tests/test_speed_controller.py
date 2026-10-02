@@ -124,3 +124,8 @@ def test_full_throttle_band_hands_over_to_the_trim_near_target():
 def test_full_throttle_band_never_overrides_braking():
     controller = SpeedController(Vehicle.default(), full_throttle_band=0.5)
     assert controller.step(3.0, 6.0, 0.025) < 0.0
+
+
+def test_full_throttle_band_can_be_suppressed_for_a_step():
+    controller = SpeedController(Vehicle.default(), full_throttle_band=0.5)
+    assert controller.step(8.0, 4.0, 0.025, allow_full=False) < 1.0

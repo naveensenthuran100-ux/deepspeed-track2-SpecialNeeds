@@ -35,6 +35,7 @@ SPEED_PARAMS = {
     "speed.brake_gain": ("brake_gain", 1.0),
     "speed.full_throttle_band": ("full_throttle_band", 0.0),
     "speed.preview_s": ("speed_preview_s", 0.0),
+    "speed.full_throttle_max_lat": ("full_throttle_max_lat", 0.0),
 }
 
 PURSUIT_PARAMS = {

@@ -91,6 +91,11 @@ driver:
       # 0 reads it at the car's own position.
       preview_s: 0.0
 
+      # Full-throttle band only while lateral load v^2*|k| on the line is
+      # below this, m/s^2 (0 = no limit). Prevents power-on understeer on
+      # corner exits, where every real collision happened.
+      full_throttle_max_lat: 0.0
+
     # ---- the racing line -------------------------------------------------
     line:
       # Blank searches /hackathon/maps for the generated racing line, then

@@ -210,6 +210,7 @@ def simulate(
     steer_override: Optional[float] = None,
     perturbation: Optional["Perturbation"] = None,
     speed_lag: float = 2.0,
+    truth_vehicle: Optional[Vehicle] = None,
     collision_debounce_s: float = 0.25,
     stuck_timeout_s: float = 3.0,
     max_off_track_m: float = 3.0,
@@ -229,8 +230,12 @@ def simulate(
     rng = np.random.RandomState(noise.seed)
     # The planner keeps `vehicle`; the dynamics use `truth`. When they differ,
     # the car is not the car the planner thinks it is - which is the point.
-    truth = (scaled_vehicle(vehicle, noise.vehicle_scale)
-             if noise.vehicle_scale != 1.0 else vehicle)
+    # `truth_vehicle` lets the car differ from the planner's belief in ways
+    # scaling cannot express - above all a different throttle map, which is
+    # the largest error measured on the real car.
+    base = truth_vehicle if truth_vehicle is not None else vehicle
+    truth = (scaled_vehicle(base, noise.vehicle_scale)
+             if noise.vehicle_scale != 1.0 else base)
     pending = []
 
     x, y, yaw = (float(v) for v in start)

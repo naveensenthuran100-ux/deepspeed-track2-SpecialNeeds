@@ -105,3 +105,22 @@ def test_braking_is_proportional_before_it_saturates():
     controller.reset()
     hard = controller.step(3.0, 5.5, 0.025)
     assert hard < mild <= 0.0
+
+
+def test_full_throttle_band_drives_at_the_target_instead_of_creeping():
+    """Far under target is time lost: with the band on, the answer is 1.0."""
+    on = SpeedController(Vehicle.default(), full_throttle_band=0.5)
+    off = SpeedController(Vehicle.default())
+    assert on.step(8.0, 4.0, 0.025) == 1.0
+    assert off.step(8.0, 4.0, 0.025) < 1.0
+
+
+def test_full_throttle_band_hands_over_to_the_trim_near_target():
+    controller = SpeedController(Vehicle.default(), full_throttle_band=0.5)
+    near = controller.step(8.0, 7.8, 0.025)
+    assert 0.0 < near < 1.0
+
+
+def test_full_throttle_band_never_overrides_braking():
+    controller = SpeedController(Vehicle.default(), full_throttle_band=0.5)
+    assert controller.step(3.0, 6.0, 0.025) < 0.0

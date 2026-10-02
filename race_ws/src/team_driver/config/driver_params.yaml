@@ -80,6 +80,17 @@ driver:
       # that the controller can actually ask for it.
       brake_gain: 1.0
 
+      # Below the target by more than this, in m/s, the throttle goes to 1.0.
+      # 0 disables it. The speed profile plans every acceleration at the
+      # traction limit, so under-target is lost time; feed-forward plus a
+      # trim creeps up on the target instead of driving at it.
+      full_throttle_band: 0.0
+
+      # Read the target speed this many seconds of travel ahead of the car,
+      # covering actuation and pose latency so braking starts on time.
+      # 0 reads it at the car's own position.
+      preview_s: 0.0
+
     # ---- the racing line -------------------------------------------------
     line:
       # Blank searches /hackathon/maps for the generated racing line, then

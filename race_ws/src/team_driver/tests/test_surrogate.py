@@ -356,3 +356,26 @@ def test_vehicle_scaling_makes_a_weaker_car_slower(real_track):
     assert weak.a_lat_max < Vehicle.default().a_lat_max
     assert weak.a_brake_max < Vehicle.default().a_brake_max
     assert weak.wheelbase == Vehicle.default().wheelbase   # geometry is not error
+
+
+def test_truth_vehicle_drives_the_dynamics_not_the_planners_belief(real_track):
+    """The planner's feed-forward uses ITS map; the car obeys the truth's. A
+    truth with a flatter map than believed must be slower - the real car's
+    situation, which scaling the limits could never express."""
+    import dataclasses
+    grid, line = real_track
+    believed = Vehicle.default()
+    flat = dataclasses.replace(believed, throttle_v_coeffs=[c * 0.6 for c in believed.throttle_v_coeffs])
+    profile = speed_profile(line.curvature, line.s, believed, grip_fraction=0.7,
+                            v_max=8.0, total_length=line.length)
+    yaw = float(np.arctan2(line.tangent[0][1], line.tangent[0][0]))
+
+    def lap(truth):
+        planner = Planner(believed, PlannerConfig())
+        planner.load_path(line, profile)
+        return simulate(planner, believed, grid, start=(line.xy[0][0], line.xy[0][1], yaw),
+                        distance_m=line.length, max_time_s=60.0, truth_vehicle=truth)
+
+    honest, fooled = lap(None), lap(flat)
+    assert honest.status == fooled.status == "COMPLETE"
+    assert fooled.elapsed_s > honest.elapsed_s

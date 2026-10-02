@@ -39,6 +39,12 @@ class SpeedController:
             be high enough that the controller can actually ask for
             `a_brake_max` - at 0.3 it never asked for more than a third of
             it, and the car arrived at every corner too fast.
+        full_throttle_band: below the target by more than this, in m/s, the
+            answer is full throttle. 0 disables it. The speed profile already
+            plans every acceleration at the traction limit, so being under
+            it is time lost; feed-forward plus a trim instead creeps up on
+            the target asymptotically. On the real car, whose feed-forward
+            was ~38% short, a 10 m/s target settled near 9.2 m/s.
     """
 
     def __init__(
@@ -49,6 +55,7 @@ class SpeedController:
         integral_limit: float = 0.30,
         lift_band: float = 0.5,
         brake_gain: float = 1.0,
+        full_throttle_band: float = 0.0,
     ):
         self.vehicle = vehicle
         self.kp = float(kp)
@@ -56,6 +63,7 @@ class SpeedController:
         self.integral_limit = abs(float(integral_limit))
         self.lift_band = abs(float(lift_band))
         self.brake_gain = abs(float(brake_gain))
+        self.full_throttle_band = max(float(full_throttle_band), 0.0)
         self.integral = 0.0
 
     def reset(self) -> None:
@@ -75,6 +83,9 @@ class SpeedController:
             self.integral = 0.0
             excess = -error - self.lift_band
             return _clip(-self.brake_gain * excess, -1.0, 0.0)
+
+        if self.full_throttle_band > 0.0 and error > self.full_throttle_band:
+            return 1.0
 
         feed_forward = self.vehicle.throttle_for_speed(v_target)
         unsaturated = feed_forward + self.kp * error + self.ki * self.integral

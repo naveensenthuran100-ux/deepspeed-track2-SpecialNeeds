@@ -57,6 +57,11 @@ class PlannerConfig:
     #: Must match params.py. The speed profile plans its braking at
     #: a_brake_max, so this has to be high enough to actually ask for it.
     brake_gain: float = 1.0
+    #: Below the target by more than this (m/s), full throttle. 0 = off.
+    full_throttle_band: float = 0.0
+    #: Read the target speed this many seconds of travel ahead of the car,
+    #: to cover actuation and pose latency. 0 = at the car's own position.
+    speed_preview_s: float = 0.0
 
     # Pure pursuit.
     k_lookahead: float = 0.35
@@ -133,6 +138,7 @@ class Planner:
             integral_limit=self.config.integral_limit,
             lift_band=self.config.lift_band,
             brake_gain=self.config.brake_gain,
+            full_throttle_band=self.config.full_throttle_band,
         )
 
         self.path: Optional[Centreline] = None
@@ -216,7 +222,22 @@ class Planner:
         # enough to make whatever is coming, so it is read at our own
         # position rather than at the lookahead point - braking for the
         # lookahead too would be braking twice for the same corner.
-        return float(result.steer_rad), float(self.profile[index]), LINE
+        return float(result.steer_rad), self._target_speed(index, speed), LINE
+
+    def _target_speed(self, index, speed) -> float:
+        """The profile's speed, read `speed_preview_s` of travel ahead.
+
+        Latency is the reason: a brake command arrives at the wheels a few
+        frames after it is computed, from a pose that was already a frame or
+        two old, so reading the profile at our own position starts every
+        braking zone late by that much.
+        """
+        preview = self.config.speed_preview_s
+        if preview <= 0.0:
+            return float(self.profile[index])
+        s = (self.path.s[index] + max(speed, 0.0) * preview) % self.path.length
+        ahead = int(np.searchsorted(self.path.s, s, side="right") - 1)
+        return float(self.profile[max(ahead, 0)])
 
     def _gap(self, scan, angles):
         result = self.gap_follower.step(scan, angles)

@@ -227,3 +227,27 @@ def test_an_obstacle_sitting_on_the_path_is_still_blocked():
     for _ in range(3):
         result = planner.step(scan, ANGLES, pose=pose, yaw=yaw, speed=3.0, dt=0.025)
     assert result.mode == "gap"
+
+
+def _step_profile_planner(**kwargs):
+    """Profile fast for the first half of the straight, slow after it."""
+    planner = Planner(Vehicle.default(), PlannerConfig(**kwargs))
+    profile = np.where(STRAIGHT.s < 30.0, 8.0, 2.0)
+    planner.load_path(STRAIGHT, profile)
+    return planner
+
+
+def test_speed_preview_reads_the_profile_ahead_of_the_car():
+    """At 8 m/s with 0.5 s of preview, a slow zone 2 m ahead is already the target."""
+    here = _step_profile_planner().step(CLEAR, ANGLES, pose=(28.0, 0.0), yaw=0.0,
+                                        speed=8.0, dt=0.025)
+    ahead = _step_profile_planner(speed_preview_s=0.5).step(
+        CLEAR, ANGLES, pose=(28.0, 0.0), yaw=0.0, speed=8.0, dt=0.025)
+    assert here.v_target == pytest.approx(8.0)
+    assert ahead.v_target == pytest.approx(2.0)
+
+
+def test_speed_preview_wraps_across_the_start_line():
+    planner = _step_profile_planner(speed_preview_s=1.0)
+    result = planner.step(CLEAR, ANGLES, pose=(59.5, 0.0), yaw=0.0, speed=8.0, dt=0.025)
+    assert np.isfinite(result.v_target)

@@ -33,6 +33,8 @@ SPEED_PARAMS = {
     "speed.integral_limit": ("integral_limit", 0.30),
     "speed.lift_band": ("lift_band", 0.15),
     "speed.brake_gain": ("brake_gain", 1.0),
+    "speed.full_throttle_band": ("full_throttle_band", 0.0),
+    "speed.preview_s": ("speed_preview_s", 0.0),
 }
 
 PURSUIT_PARAMS = {

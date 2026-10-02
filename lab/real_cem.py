@@ -88,7 +88,9 @@ def drive(tag, params, laps):
             time.sleep(5)
             continue
         return result
-    return result if os.path.exists(path) else {"status": "NO_RESULT", "lap_times": []}
+    # Never driven: the simulator ignored commands or the driver never
+    # started. That says nothing about the candidate, so it is not scored.
+    return None
 
 
 def score_run(result, laps):
@@ -131,6 +133,7 @@ def main():
     a = p.parse_args()
     os.environ["RS_MAX_GAPS"] = str(a.max_gaps)
     runs_since_restart = 0
+    not_driving = 0
 
     rng = np.random.RandomState(a.seed)
     keys = list(SPACE)
@@ -188,6 +191,21 @@ def main():
             runs_since_restart += 1
             tag = f"rc_g{gen}_c{c.cid}_{len(c.scores)}"
             result = drive(tag, c.params, a.laps)
+            if result is None:
+                not_driving += 1
+                print(f"[{time.strftime('%H:%M')}] c{c.cid}: simulator did not drive "
+                      f"({not_driving} in a row) - not scored", flush=True)
+                if not_driving == 2:
+                    out = subprocess.run(["bash", os.path.join(REPO, "lab", "restart_bridge.sh")],
+                                         capture_output=True, text=True)
+                    time.sleep(60)          # it takes about a minute to start streaming again
+                    print(f"[{time.strftime('%H:%M')}] bridge restart: {out.stdout.strip()}", flush=True)
+                if not_driving >= 4:
+                    print("STOPPING: the simulator will not drive. It needs Disconnect -> "
+                          "Connect -> Autonomous in its window.", flush=True)
+                    return
+                continue
+            not_driving = 0
             s = score_run(result, a.laps)
             c.scores.append(s)
             with open(LOG, "a") as handle:

@@ -110,6 +110,8 @@ def main():
     p.add_argument("--elite", type=int, default=3)
     p.add_argument("--laps", type=int, default=4)
     p.add_argument("--seed", type=int, default=7)
+    p.add_argument("--resume", action="store_true",
+                   help="replay results/realsim/real_cem.jsonl and carry on from its elites")
     a = p.parse_args()
 
     rng = np.random.RandomState(a.seed)
@@ -127,6 +129,25 @@ def main():
         out = {k: round(float(v), 4) for k, v in zip(keys, x)}
         out["line.raceline_csv"] = line
         return out
+
+    if a.resume and os.path.exists(LOG):
+        # Every candidate driven so far, with every score it earned.
+        seen = {}
+        for row in map(json.loads, open(LOG)):
+            c = seen.setdefault(row["cid"], Cand(row["cid"], row["params"]))
+            c.scores.append(row["score"])
+            gen = max(gen, row["gen"] + 1)
+        cid = max(seen) + 1
+        elites = [c for c in sorted(seen.values(), key=lambda c: c.score)[: a.elite]
+                  if c.score < FAIL]
+        if elites:
+            U = np.array([(np.array([c.params[k] for k in keys]) - lo) / (hi - lo) for c in elites])
+            mean = U.mean(axis=0)
+            std = np.maximum(U.std(axis=0), 0.05)
+            counts = np.array([sum(c.params["line.raceline_csv"] == l for c in elites) for l in LINES], float)
+            line_p = 0.7 * (counts + 0.3) / (counts + 0.3).sum() + 0.3 * line_p
+        print(f"resumed: {len(seen)} candidates, generation {gen}, elites "
+              + ", ".join(f"c{c.cid} {c.score:.3f} (n={len(c.scores)})" for c in elites), flush=True)
 
     while time.time() < deadline:
         fresh = []

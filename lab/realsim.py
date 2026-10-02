@@ -262,9 +262,10 @@ class Bench(Node):
             result["odom_median_ms"] = round(1000 * gaps[len(gaps) // 2], 1)
             result["odom_p95_ms"] = round(1000 * gaps[int(0.95 * (len(gaps) - 1))], 1)
             result["odom_gaps_100ms"] = sum(g > 0.1 for g in gaps)
-            if result["odom_gaps_100ms"] > 3 and status == "COMPLETE":
+            limit = int(os.environ.get("RS_MAX_GAPS", "3"))
+            if result["odom_gaps_100ms"] > limit and status == "COMPLETE":
                 status = "INVALID_TIMING"
-            elif result["odom_gaps_100ms"] > 3:
+            elif result["odom_gaps_100ms"] > limit:
                 status += "+BAD_TIMING"
         result["status"] = status
         result["collisions"] = raced_collisions

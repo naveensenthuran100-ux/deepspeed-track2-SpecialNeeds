@@ -16,7 +16,7 @@ sim_pid="$(pgrep -f 'AutoDRIVE Simulator.app/Contents/MacOS' | head -1 || true)"
 if [ -n "$sim_pid" ]; then
   osascript -e "tell application \"System Events\" to set frontmost of (first process whose unix id is $sim_pid) to true" >/dev/null 2>&1 || true
 fi
-docker exec roboracer_track2 /usr/local/bin/entrypoint.sh bash -lc \
+docker exec -e RS_MAX_GAPS="${RS_MAX_GAPS:-3}" roboracer_track2 /usr/local/bin/entrypoint.sh bash -lc \
   "cd /hackathon/race_ws && source install/local_setup.bash && python3 /hackathon/lab/realsim.py --params $base --laps $laps --tag $tag $(printf '%q ' "${sets[@]}")" \
   > /dev/null 2>&1 || true
 f="$(cd "$(dirname "$0")/.." && pwd)/results/realsim/$tag.result.json"

@@ -110,9 +110,15 @@ def main():
     p.add_argument("--elite", type=int, default=3)
     p.add_argument("--laps", type=int, default=4)
     p.add_argument("--seed", type=int, default=7)
+    p.add_argument("--max-gaps", type=int, default=3,
+                   help="odometry gaps >100 ms a run may have and still count")
+    p.add_argument("--restart-bridge-every", type=int, default=0,
+                   help="restart the bridge after this many runs (0 = never); it slows over hours")
     p.add_argument("--resume", action="store_true",
                    help="replay results/realsim/real_cem.jsonl and carry on from its elites")
     a = p.parse_args()
+    os.environ["RS_MAX_GAPS"] = str(a.max_gaps)
+    runs_since_restart = 0
 
     rng = np.random.RandomState(a.seed)
     keys = list(SPACE)
@@ -160,6 +166,13 @@ def main():
         for c in fresh + elites:
             if time.time() > deadline:
                 break
+            if a.restart_bridge_every and runs_since_restart >= a.restart_bridge_every:
+                out = subprocess.run(["bash", os.path.join(REPO, "lab", "restart_bridge.sh")],
+                                     capture_output=True, text=True)
+                print(f"[{time.strftime('%H:%M')}] bridge restart: {out.stdout.strip().splitlines()[-1:]}",
+                      flush=True)
+                runs_since_restart = 0
+            runs_since_restart += 1
             tag = f"rc_g{gen}_c{c.cid}_{len(c.scores)}"
             result = drive(tag, c.params, a.laps)
             s = score_run(result, a.laps)

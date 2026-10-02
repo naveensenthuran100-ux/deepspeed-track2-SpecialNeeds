@@ -57,7 +57,7 @@ SPACE = {
     "pursuit.curvature_cap":    (0.50, 1.40, 1.011),
     # Full throttle only below this lateral load (m/s^2). 12 is effectively
     # off for every candidate driven before it existed.
-    "speed.full_throttle_max_lat": (2.0, 12.0, 12.0),
+    "speed.full_throttle_max_lat": (2.0, 12.0, 5.0),
 }
 LINES = ["/hackathon/lab/lines/mt_k1.2.csv",            # best clean real run: 11.75 mean
          "/hackathon/lab/shortlist/cem/raceline_m0300.csv",

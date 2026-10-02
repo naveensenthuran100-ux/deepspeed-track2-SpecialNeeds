@@ -78,6 +78,7 @@ class Driver(Node):
         self.declare_parameter("line.raceline_csv", "")
         self.declare_parameter("line.grip_fraction", 0.70)
         self.declare_parameter("line.v_max", 12.0)
+        self.declare_parameter("line.friction_circle", False)
         # How old the pose may be before we stop believing it, in simulated
         # seconds. Ten frames at 40 Hz.
         self.declare_parameter("pose_timeout_s", 0.25)
@@ -157,6 +158,7 @@ class Driver(Node):
                 vehicle, candidate,
                 grip_fraction=float(self.get_parameter("line.grip_fraction").value),
                 v_max=float(self.get_parameter("line.v_max").value),
+                friction_circle=bool(self.get_parameter("line.friction_circle").value),
             )
             if path is not None:
                 self.planner.load_path(path, profile)

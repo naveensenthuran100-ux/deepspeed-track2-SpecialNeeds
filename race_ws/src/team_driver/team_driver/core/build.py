@@ -26,6 +26,7 @@ def load_racing_stack(
     grip_fraction: float = 0.4,
     v_max: Optional[float] = None,
     v_min: float = 0.3,
+    friction_circle: bool = False,
 ) -> Tuple[Optional[Centreline], Optional[np.ndarray]]:
     """(path, speed profile), or (None, None) if the line cannot be loaded.
 
@@ -44,6 +45,7 @@ def load_racing_stack(
             v_max=v_max,
             v_min=v_min,
             total_length=path.length,
+            friction_circle=friction_circle,
         )
     except Exception:
         return None, None

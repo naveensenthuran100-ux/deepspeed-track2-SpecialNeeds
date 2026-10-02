@@ -245,6 +245,22 @@ class Bench(Node):
         self.recording = False
         self.stop_driver()
 
+        # Timing quality. A Unity window that macOS throttles (App Nap, display
+        # sleep, not frontmost) delivers odometry in 100-370 ms bursts; the car
+        # then steers blind and runs wide, which reads exactly like a bad
+        # config. Measured overnight 2026-10-02: 0 such gaps per run at first,
+        # 34-120 per run later. A run like that says nothing about the driver.
+        stamps = [r["t"] for r in self.rows]
+        if len(stamps) > 10:
+            gaps = [b - a for a, b in zip(stamps, stamps[1:])]
+            gaps.sort()
+            result["odom_median_ms"] = round(1000 * gaps[len(gaps) // 2], 1)
+            result["odom_p95_ms"] = round(1000 * gaps[int(0.95 * (len(gaps) - 1))], 1)
+            result["odom_gaps_100ms"] = sum(g > 0.1 for g in gaps)
+            if result["odom_gaps_100ms"] > 3 and status == "COMPLETE":
+                status = "INVALID_TIMING"
+            elif result["odom_gaps_100ms"] > 3:
+                status += "+BAD_TIMING"
         result["status"] = status
         result["collisions"] = (self.v["collisions"] or coll0) - coll0
         flying = result["lap_times"][1:]
@@ -264,15 +280,25 @@ class Bench(Node):
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--params", required=True, help="driver params yaml (full file)")
+    p.add_argument("--params", default=BASE_PARAMS, help="driver params yaml (full file)")
+    p.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
+                   help="override on top of --params, e.g. line.grip_fraction=0.9 (repeatable)")
     p.add_argument("--laps", type=int, default=5)
     p.add_argument("--tag", default=time.strftime("run_%H%M%S"))
     a = p.parse_args()
+    params = a.params
+    if a.set:
+        overrides = {}
+        for item in a.set:
+            key, value = item.split("=", 1)
+            overrides[key] = yaml.safe_load(value)
+        os.makedirs(OUT, exist_ok=True)
+        params = write_params(overrides, f"{OUT}/{a.tag}.params.yaml", base=a.params)
     rclpy.init()
     bench = Bench()
     bench.pump(1.0)
     try:
-        print(json.dumps(bench.evaluate(a.params, a.laps, a.tag), indent=2))
+        print(json.dumps(bench.evaluate(params, a.laps, a.tag), indent=2))
     finally:
         bench.stop_driver()
         rclpy.shutdown()

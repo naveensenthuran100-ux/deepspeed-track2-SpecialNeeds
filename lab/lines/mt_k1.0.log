@@ -1,0 +1,10 @@
+model lap 10.404 s -> 10.326 s   length 53.20 m   (a_lat 8.0, margin 0.25, kappa_max 1.0)
+min radius 0.97 m   min wall clearance 0.432 m (need 0.385)   all on track: True   optimiser: STOP: TOTAL NO. OF F,G EVALUATIONS EXCEEDS LIMIT
+
+corner dir  entry s  apex s  exit s  R min  v entry  v apex  v exit
+     1   R     13.2    14.9    15.9   1.08     4.22    2.94    3.66
+     2   L     29.9    31.5    32.9   0.97     3.29    2.79    2.96
+     3   R     34.7    35.7    37.7   0.99     3.17    2.81    3.39
+     4   R     44.4    46.0    47.0   1.80     4.86    3.80    4.44
+
+wrote ../../../lab/lines/mt_k1.0.csv

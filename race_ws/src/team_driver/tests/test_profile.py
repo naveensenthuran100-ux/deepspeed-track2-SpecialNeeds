@@ -91,3 +91,25 @@ def test_profile_is_periodic_around_the_lap():
     s = np.linspace(0.0, 80.0, 400)
     speeds = speed_profile(curvature, s, Vehicle.default(), 1.0)
     assert speeds[-1] < speeds[200]
+
+
+def test_friction_circle_brakes_earlier_and_never_faster():
+    """Sharing grip with the corner leaves less to brake with, so the braking
+    zone starts earlier: every sample is at most as fast, and some slower."""
+    s = np.linspace(0.0, 40.0, 401)
+    kappa = np.where((s > 20.0) & (s < 24.0), 1.0, 0.0)
+    v = Vehicle.default()
+    plain = speed_profile(kappa, s, v, v_max=12.0, total_length=40.1)
+    shared = speed_profile(kappa, s, v, v_max=12.0, total_length=40.1, friction_circle=True)
+    assert np.all(shared <= plain + 1e-9)
+    assert np.any(shared < plain - 0.1)
+
+
+def test_friction_circle_keeps_the_cornering_speed():
+    """At the apex all the grip goes to turning; the speed there is unchanged."""
+    s = np.linspace(0.0, 40.0, 401)
+    kappa = np.where((s > 20.0) & (s < 24.0), 1.0, 0.0)
+    v = Vehicle.default()
+    shared = speed_profile(kappa, s, v, v_max=12.0, total_length=40.1, friction_circle=True)
+    apex = (s > 21.0) & (s < 23.0)
+    assert np.allclose(shared[apex], np.sqrt(v.a_lat_max / 1.0), rtol=0.02)

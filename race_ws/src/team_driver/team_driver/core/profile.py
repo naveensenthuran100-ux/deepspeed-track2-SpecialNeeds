@@ -35,6 +35,7 @@ def speed_profile(
     v_min: float = 0.3,
     total_length=None,
     rounds: int = 2,
+    friction_circle: bool = False,
 ):
     """Target speed at every sample of a closed path.
 
@@ -51,6 +52,12 @@ def speed_profile(
             assuming the closing segment matches the mean spacing.
         rounds: forward/backward sweeps. Two converges the wrap; more is
             harmless and costs microseconds.
+        friction_circle: share grip between cornering and accelerating or
+            braking, a_x <= a_x_max * sqrt(1 - (v^2 k / a_lat)^2). Without it
+            the profile brakes at a_brake_max right up to a corner it also
+            takes at the full lateral limit. Measured on the real car, that
+            combined demand saturated the tyres on entry: the car ran wide at
+            full lock, and every collision was on the outside of a corner.
     """
     kappa = np.abs(np.asarray(curvature, dtype=np.float64))
     arc = np.asarray(s, dtype=np.float64)
@@ -71,18 +78,27 @@ def speed_profile(
     accel = float(vehicle.a_accel_max)
     brake = float(vehicle.a_brake_max)
 
+    def share(limit, v, k):
+        """Longitudinal acceleration left over at speed v on curvature k."""
+        if not friction_circle:
+            return limit
+        used = min(v * v * k / lateral, 1.0)
+        return limit * np.sqrt(max(1.0 - used * used, 0.0))
+
     for _ in range(max(int(rounds), 1)):
         # 2. forwards: never ask for more acceleration than we have.
         for i in range(count):
             j = (i + 1) % count
-            reachable = np.sqrt(speeds[i] ** 2 + 2.0 * accel * segments[i])
+            reachable = np.sqrt(speeds[i] ** 2
+                                + 2.0 * share(accel, speeds[i], kappa[i]) * segments[i])
             if speeds[j] > reachable:
                 speeds[j] = reachable
 
         # 3. backwards: be slow enough now to make the corner later.
         for i in range(count - 1, -1, -1):
             j = (i + 1) % count
-            survivable = np.sqrt(speeds[j] ** 2 + 2.0 * brake * segments[i])
+            survivable = np.sqrt(speeds[j] ** 2
+                                 + 2.0 * share(brake, speeds[j], kappa[j]) * segments[i])
             if speeds[i] > survivable:
                 speeds[i] = survivable
 

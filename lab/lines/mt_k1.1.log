@@ -1,0 +1,10 @@
+model lap 10.404 s -> 10.262 s   length 53.19 m   (a_lat 8.0, margin 0.25, kappa_max 1.1)
+min radius 0.90 m   min wall clearance 0.437 m (need 0.385)   all on track: True   optimiser: CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH
+
+corner dir  entry s  apex s  exit s  R min  v entry  v apex  v exit
+     1   R     13.2    14.9    15.9   1.06     4.24    2.91    3.67
+     2   L     29.9    31.1    32.9   0.90     3.47    2.68    3.21
+     3   R     34.7    35.7    37.7   0.91     3.47    2.70    3.40
+     4   R     44.6    45.6    47.0   1.94     4.56    3.94    4.37
+
+wrote ../../../lab/lines/mt_k1.1.csv

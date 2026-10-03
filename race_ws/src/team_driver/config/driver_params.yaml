@@ -167,7 +167,7 @@ driver:
       # at ~1 Hz (+-5 deg of heading): the heading loop's bandwidth grows with
       # speed until it is as fast as the loop's latency, and overshoots.
       # heading_speed_ref: above this speed the heading gain falls as ref/v.
-      heading_speed_ref: 0.0
+      heading_speed_ref: 4.0
       # k_yaw: steer against (measured yaw rate - v * line curvature).
       k_yaw: 0.0
 

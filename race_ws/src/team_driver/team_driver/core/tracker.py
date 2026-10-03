@@ -58,6 +58,15 @@ class FeedForwardTracker:
             is stable at 2 m/s does not oscillate at 8 m/s.
         soft_speed: floor under that division, so a stationary car does not
             ask for infinite correction.
+        heading_speed_ref: above this speed (m/s) the heading gain falls as
+            ref/v. 0 = off. The heading loop's bandwidth is v*k_heading/L: at
+            7 m/s and k_heading 0.66 it corrects in ~70 ms, about the loop's
+            own latency (stale odometry + actuation, 40-60 ms) - so it
+            overshoots, and the real car weaved at ~1 Hz on the straights.
+            Scaling the gain by 1/v holds that bandwidth constant.
+        k_yaw: yaw-rate damping, 0 = off. Steering against the gap between the
+            car's measured yaw rate and the one the line asks for (v * kappa)
+            is the damper the heading loop lacks.
     """
 
     def __init__(
@@ -69,6 +78,8 @@ class FeedForwardTracker:
         k_heading: float = 1.0,
         k_cross: float = 2.2,
         soft_speed: float = 1.0,
+        heading_speed_ref: float = 0.0,
+        k_yaw: float = 0.0,
     ):
         self.vehicle = vehicle
         self.tau_preview = float(tau_preview)
@@ -77,13 +88,16 @@ class FeedForwardTracker:
         self.k_heading = float(k_heading)
         self.k_cross = float(k_cross)
         self.soft_speed = float(soft_speed)
+        self.heading_speed_ref = float(heading_speed_ref)
+        self.k_yaw = float(k_yaw)
 
     def preview_for(self, speed: float) -> float:
         speed = float(speed) if math.isfinite(float(speed)) else 0.0
         distance = self.tau_preview * max(speed, 0.0)
         return min(max(distance, self.min_preview), self.max_preview)
 
-    def step(self, pose_xy, yaw: float, speed: float, path: Centreline) -> TrackerResult:
+    def step(self, pose_xy, yaw: float, speed: float, path: Centreline,
+             yaw_rate=None) -> TrackerResult:
         yaw = float(yaw)
         speed = float(speed) if math.isfinite(float(speed)) else 0.0
 
@@ -107,7 +121,18 @@ class FeedForwardTracker:
             -self.k_cross * cross_track / (abs(speed) + self.soft_speed)
         )
 
-        steer = feed_forward + self.k_heading * heading_error + correction
+        k_heading = self.k_heading
+        if self.heading_speed_ref > 0.0 and speed > self.heading_speed_ref:
+            k_heading *= self.heading_speed_ref / speed
+
+        # -- yaw-rate damping: oppose turning faster or slower than the line --
+        damping = 0.0
+        if self.k_yaw > 0.0 and yaw_rate is not None and math.isfinite(float(yaw_rate)):
+            expected = speed * float(path.curvature[index])
+            damping = (-self.k_yaw * self.vehicle.wheelbase * (float(yaw_rate) - expected)
+                       / max(abs(speed), self.soft_speed))
+
+        steer = feed_forward + k_heading * heading_error + correction + damping
         lock = self.vehicle.max_steer_rad
         return TrackerResult(
             steer_rad=min(max(steer, -lock), lock),

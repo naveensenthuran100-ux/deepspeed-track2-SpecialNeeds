@@ -117,3 +117,39 @@ def test_outputs_are_finite_from_anywhere():
             path,
         )
         assert np.isfinite(result.steer_rad)
+
+
+def _straight_tracker(**kwargs):
+    import numpy as np
+    from team_driver.core.track import Centreline
+    from team_driver.core.tracker import FeedForwardTracker
+    from team_driver.core.vehicle import Vehicle
+    path = Centreline(np.stack([np.linspace(0.0, 60.0, 300), np.zeros(300)], axis=1))
+    return FeedForwardTracker(Vehicle.default(), **kwargs), path
+
+
+def test_heading_gain_is_scheduled_down_at_speed():
+    """Above heading_speed_ref the heading term shrinks as ref/v."""
+    plain, path = _straight_tracker(k_heading=1.0, k_cross=0.0)
+    scheduled, _ = _straight_tracker(k_heading=1.0, k_cross=0.0, heading_speed_ref=4.0)
+    a = plain.step((10.0, 0.0), 0.1, 8.0, path).steer_rad
+    b = scheduled.step((10.0, 0.0), 0.1, 8.0, path).steer_rad
+    assert b == pytest.approx(a * 0.5, rel=1e-6)
+    slow = scheduled.step((10.0, 0.0), 0.1, 3.0, path).steer_rad
+    assert slow == pytest.approx(plain.step((10.0, 0.0), 0.1, 3.0, path).steer_rad)
+
+
+def test_yaw_damping_steers_against_excess_turn_rate():
+    """On a straight, turning left (positive yaw rate) must draw steering right."""
+    damped, path = _straight_tracker(k_heading=0.0, k_cross=0.0, k_yaw=0.5)
+    left = damped.step((10.0, 0.0), 0.0, 6.0, path, yaw_rate=0.8).steer_rad
+    still = damped.step((10.0, 0.0), 0.0, 6.0, path, yaw_rate=0.0).steer_rad
+    assert left < still - 1e-3
+
+
+def test_damping_options_off_change_nothing():
+    plain, path = _straight_tracker()
+    off, _ = _straight_tracker(heading_speed_ref=0.0, k_yaw=0.0)
+    for yaw_rate in (None, 0.7):
+        assert off.step((10.0, 0.2), 0.05, 7.0, path, yaw_rate=yaw_rate).steer_rad == \
+            pytest.approx(plain.step((10.0, 0.2), 0.05, 7.0, path).steer_rad)

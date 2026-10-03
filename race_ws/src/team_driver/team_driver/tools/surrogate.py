@@ -246,6 +246,7 @@ def simulate(
         yaw += float(rng.normal(0.0, noise.start_yaw_jitter))
     speed = 0.0
     steer = 0.0
+    yaw_rate = 0.0
 
     path = getattr(planner, "path", None)
     previous_s = None
@@ -276,7 +277,7 @@ def simulate(
             ranges = np.clip(
                 ranges + rng.normal(0.0, noise.scan_noise_m, ranges.shape),
                 0.0, sensor.max_range)
-        plan = planner.step(ranges, angles, (x, y), yaw, speed, dt)
+        plan = planner.step(ranges, angles, (x, y), yaw, speed, dt, yaw_rate=yaw_rate)
 
         steer_cmd = plan.steer_norm
         throttle_cmd = plan.throttle

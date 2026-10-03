@@ -49,6 +49,8 @@ PURSUIT_PARAMS = {
     "pursuit.max_preview": ("max_preview", 2.5),
     "pursuit.k_heading": ("k_heading", 0.7),
     "pursuit.k_cross": ("k_cross", 2.2),
+    "pursuit.heading_speed_ref": ("heading_speed_ref", 0.0),
+    "pursuit.k_yaw": ("k_yaw", 0.0),
 }
 
 MODE_PARAMS = {

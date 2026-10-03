@@ -85,6 +85,10 @@ class PlannerConfig:
     max_preview: float = 2.5
     k_heading: float = 0.7
     k_cross: float = 2.2
+    #: Heading gain falls as ref/v above this speed (m/s); 0 = off.
+    heading_speed_ref: float = 0.0
+    #: Yaw-rate damping gain; 0 = off. See core/tracker.py.
+    k_yaw: float = 0.0
 
     #: Give up on the line if we are further than this from it, in metres.
     #: Either the pose is wrong or we have already left the track; in both
@@ -135,6 +139,8 @@ class Planner:
             max_preview=self.config.max_preview,
             k_heading=self.config.k_heading,
             k_cross=self.config.k_cross,
+            heading_speed_ref=self.config.heading_speed_ref,
+            k_yaw=self.config.k_yaw,
         )
         self.speed_controller = SpeedController(
             vehicle,
@@ -185,14 +191,14 @@ class Planner:
 
     # -- the control step ------------------------------------------------
 
-    def step(self, ranges, angles, pose, yaw, speed, dt) -> PlanResult:
+    def step(self, ranges, angles, pose, yaw, speed, dt, yaw_rate=None) -> PlanResult:
         speed = _finite(speed, 0.0)
         dt = _finite(dt, 0.0)
         angles = np.asarray(angles, dtype=np.float64)
         scan = clean(ranges, self.config.gap.max_range)
 
         pose_yaw = _valid_pose(pose, yaw)
-        steer_rad, v_target, mode = self._decide(scan, angles, pose_yaw, speed)
+        steer_rad, v_target, mode = self._decide(scan, angles, pose_yaw, speed, yaw_rate)
 
         allow_full = True
         limit = self.config.full_throttle_max_lat
@@ -206,7 +212,7 @@ class Planner:
             v_target=max(0.0, _finite(v_target, 0.0)),
         )
 
-    def _decide(self, scan, angles, pose_yaw, speed):
+    def _decide(self, scan, angles, pose_yaw, speed, yaw_rate=None):
         if self.path is None or self.profile is None or pose_yaw is None:
             return self._gap(scan, angles)
 
@@ -228,7 +234,7 @@ class Planner:
         if self.config.tracker == "pursuit":
             result = self.pursuit.step((x, y), heading, speed, self.path)
         else:
-            result = self.tracker.step((x, y), heading, speed, self.path)
+            result = self.tracker.step((x, y), heading, speed, self.path, yaw_rate=yaw_rate)
         # The profile's backward pass already guarantees this speed is slow
         # enough to make whatever is coming, so it is read at our own
         # position rather than at the lookahead point - braking for the

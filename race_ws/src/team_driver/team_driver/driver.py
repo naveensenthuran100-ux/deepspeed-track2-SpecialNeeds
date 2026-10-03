@@ -250,7 +250,8 @@ class Driver(Node):
             if position is not None and self.extrapolate:
                 position, yaw = self._project(position, yaw, self._stamp_of(scan))
             result = self.planner.step(
-                scan.ranges, angles, position, yaw, self.speed, dt
+                scan.ranges, angles, position, yaw, self.speed, dt,
+                yaw_rate=self.yaw_rate,
             )
             self._last_steer = result.steer_norm
             self.publish(result.steer_norm, result.throttle)

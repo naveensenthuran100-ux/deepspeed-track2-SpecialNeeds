@@ -171,6 +171,18 @@ driver:
       # k_yaw: steer against (measured yaw rate - v * line curvature).
       k_yaw: 0.0
 
+      # Model-predictive steering, used when tracker is "mpc" (core/mpc.py):
+      # plans mpc_horizon steps of mpc_dt seconds along the line with the
+      # in-flight command modelled (mpc_delay_steps), and minimises
+      # q_e*lateral^2 + q_psi*heading^2 + r_du*steer_rate^2 + r_w*deviation^2.
+      mpc_horizon: 20
+      mpc_dt: 0.05
+      mpc_q_e: 4.0
+      mpc_q_psi: 1.0
+      mpc_r_du: 5.0
+      mpc_r_w: 0.05
+      mpc_delay_steps: 1
+
     # ---- when to give up on the line ------------------------------------
     mode:
       # Distance from the line past which we stop believing it, m.

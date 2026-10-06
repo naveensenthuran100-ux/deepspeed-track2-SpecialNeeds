@@ -34,6 +34,7 @@ import numpy as np
 from .gap import GapConfig, GapFollower
 from .lidar import clean
 from .pursuit import PurePursuit
+from .mpc import MPCTracker
 from .tracker import FeedForwardTracker
 from .speed_controller import SpeedController
 from .track import Centreline
@@ -90,6 +91,15 @@ class PlannerConfig:
     #: Yaw-rate damping gain; 0 = off. See core/tracker.py.
     k_yaw: float = 0.0
 
+    #: Model-predictive steering (tracker = "mpc"); see core/mpc.py.
+    mpc_horizon: int = 20
+    mpc_dt: float = 0.05
+    mpc_q_e: float = 4.0
+    mpc_q_psi: float = 1.0
+    mpc_r_du: float = 5.0
+    mpc_r_w: float = 0.05
+    mpc_delay_steps: int = 1
+
     #: Give up on the line if we are further than this from it, in metres.
     #: Either the pose is wrong or we have already left the track; in both
     #: cases the scan is the only thing worth believing.
@@ -142,6 +152,16 @@ class Planner:
             heading_speed_ref=self.config.heading_speed_ref,
             k_yaw=self.config.k_yaw,
         )
+        self.mpc = MPCTracker(
+            vehicle,
+            horizon=self.config.mpc_horizon,
+            dt=self.config.mpc_dt,
+            q_e=self.config.mpc_q_e,
+            q_psi=self.config.mpc_q_psi,
+            r_du=self.config.mpc_r_du,
+            r_w=self.config.mpc_r_w,
+            delay_steps=self.config.mpc_delay_steps,
+        )
         self.speed_controller = SpeedController(
             vehicle,
             kp=self.config.kp,
@@ -176,6 +196,7 @@ class Planner:
             )
         self.path = path
         self.profile = profile
+        self.mpc.set_profile(profile)
         # Acquire the line immediately. The hysteresis below governs recovery
         # after a block, not first acquisition - the blocked check runs on
         # frame one, so waiting out block_exit_frames here would just give
@@ -185,6 +206,7 @@ class Planner:
 
     def reset(self) -> None:
         self.speed_controller.reset()
+        self.mpc.reset()
         self.mode = LINE if self.path is not None else GAP
         self._blocked_frames = 0
         self._clear_frames = 0
@@ -233,6 +255,8 @@ class Planner:
 
         if self.config.tracker == "pursuit":
             result = self.pursuit.step((x, y), heading, speed, self.path)
+        elif self.config.tracker == "mpc":
+            result = self.mpc.step((x, y), heading, speed, self.path, yaw_rate=yaw_rate)
         else:
             result = self.tracker.step((x, y), heading, speed, self.path, yaw_rate=yaw_rate)
         # The profile's backward pass already guarantees this speed is slow

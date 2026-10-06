@@ -51,6 +51,13 @@ PURSUIT_PARAMS = {
     "pursuit.k_cross": ("k_cross", 2.2),
     "pursuit.heading_speed_ref": ("heading_speed_ref", 0.0),
     "pursuit.k_yaw": ("k_yaw", 0.0),
+    "pursuit.mpc_horizon": ("mpc_horizon", 20),
+    "pursuit.mpc_dt": ("mpc_dt", 0.05),
+    "pursuit.mpc_q_e": ("mpc_q_e", 4.0),
+    "pursuit.mpc_q_psi": ("mpc_q_psi", 1.0),
+    "pursuit.mpc_r_du": ("mpc_r_du", 5.0),
+    "pursuit.mpc_r_w": ("mpc_r_w", 0.05),
+    "pursuit.mpc_delay_steps": ("mpc_delay_steps", 1),
 }
 
 MODE_PARAMS = {

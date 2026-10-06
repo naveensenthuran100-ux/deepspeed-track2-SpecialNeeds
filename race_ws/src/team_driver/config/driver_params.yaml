@@ -145,7 +145,7 @@ driver:
       # grip_fraction). Near full steering lock the front tyres hold only
       # ~5 m/s^2; every collision of the fastest configs was at the exit of
       # the 0.87 m hairpin, MPC included.
-      grip_fraction_tight: 0.0
+      grip_fraction_tight: 0.9
       tight_radius: 1.0
 
     # ---- path tracking ---------------------------------------------------

@@ -1,6 +1,6 @@
 {
   "a_accel_max": 6.252588862558468,
-  "a_brake_max": 7.587956259427785,
+  "a_brake_max": 8.5,
   "a_coast": 7.587956259427785,
   "a_lat_max": 5.57174894,
   "grip_saturated": false,

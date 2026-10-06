@@ -11,6 +11,21 @@ as an assumption. Read §4 before trusting any number.
 
 ## 0. Read this first — the overnight session of 2026-10-02/03
 
+### Update 2026-10-07 — shipped: braking 8.5 + tight-corner grip (config "H")
+
+Real simulator, judged format, shipped files: **0 collisions in 4 of 4 runs**,
+best laps 10.69–10.72 s, 10-lap totals **107.9 / 108.6 / 108.3 / 108.2 s**.
+The fast c83 config below was clean in ~1 run of 3 (totals 108–129 s).
+
+- `vehicle.json` `a_brake_max` 7.59 → **8.5** (IMU recorded 7.8–8.8 m/s² of
+  real braking; alone: best lap −0.15 s, collision rate unchanged).
+- `line.grip_fraction_tight` **0.90** for `tight_radius` **1.0 m**: 73% of the
+  30 collisions in the 18-run upgrade test were at the exit of the 0.87 m
+  hairpin (s 34–39) — near full lock the tyres hold ~5 m/s² — MPC included.
+- Tested and not adopted: open-corner grip 1.5 (9 collisions in 3 runs),
+  MPC steering (`tracker: mpc`, most reliable before this fix but ~0.3 s/lap
+  slower; kept, off). Results: `results/realsim/up_*`, `tt_*`, `shipped_H_12lap`.
+
 ### Where we are — two configs, one decision
 
 Both driven **exactly as judged** (shipped files, no `--driver-params`, out

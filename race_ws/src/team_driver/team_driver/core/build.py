@@ -30,6 +30,8 @@ def load_racing_stack(
     grip_fraction_fast: float = 0.0,
     fast_radius: float = 2.0,
     fast_buffer_m: float = 1.0,
+    grip_fraction_tight: float = 0.0,
+    tight_radius: float = 1.0,
 ) -> Tuple[Optional[Centreline], Optional[np.ndarray]]:
     """(path, speed profile), or (None, None) if the line cannot be loaded.
 
@@ -52,6 +54,8 @@ def load_racing_stack(
             grip_fraction_fast=grip_fraction_fast,
             fast_radius=fast_radius,
             fast_buffer_m=fast_buffer_m,
+            grip_fraction_tight=grip_fraction_tight,
+            tight_radius=tight_radius,
         )
     except Exception:
         return None, None

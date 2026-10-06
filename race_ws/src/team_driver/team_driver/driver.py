@@ -83,6 +83,8 @@ class Driver(Node):
         self.declare_parameter("line.grip_fraction_fast", 0.0)
         self.declare_parameter("line.fast_radius", 2.0)
         self.declare_parameter("line.fast_buffer_m", 1.0)
+        self.declare_parameter("line.grip_fraction_tight", 0.0)
+        self.declare_parameter("line.tight_radius", 1.0)
         # How old the pose may be before we stop believing it, in simulated
         # seconds. Ten frames at 40 Hz.
         self.declare_parameter("pose_timeout_s", 0.25)
@@ -173,6 +175,8 @@ class Driver(Node):
                 grip_fraction_fast=float(self.get_parameter("line.grip_fraction_fast").value),
                 fast_radius=float(self.get_parameter("line.fast_radius").value),
                 fast_buffer_m=float(self.get_parameter("line.fast_buffer_m").value),
+                grip_fraction_tight=float(self.get_parameter("line.grip_fraction_tight").value),
+                tight_radius=float(self.get_parameter("line.tight_radius").value),
             )
             if path is not None:
                 self.planner.load_path(path, profile)

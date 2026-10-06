@@ -39,6 +39,8 @@ def speed_profile(
     grip_fraction_fast: float = 0.0,
     fast_radius: float = 2.0,
     fast_buffer_m: float = 1.0,
+    grip_fraction_tight: float = 0.0,
+    tight_radius: float = 1.0,
 ):
     """Target speed at every sample of a closed path.
 
@@ -66,6 +68,14 @@ def speed_profile(
             fast zone, the car accelerated toward the fast target while still
             at full lock at the apex, where the saturated front tyres hold only
             ~5 m/s^2, ran wide and hit the outer wall.
+        grip_fraction_tight: grip fraction for corners tighter than
+            tight_radius (0 = same as grip_fraction). Those need near-full
+            steering lock, where the front tyres saturate: measured on the
+            real car, ~5 m/s^2 at full lock against ~9 at moderate steering.
+            Every collision of the fastest configurations - with the MPC
+            tracking the line to 5 cm, too - was at the exit of the 0.87 m
+            hairpin: understeer at the apex, showing up a metre later.
+        tight_radius: the radius, in metres, below which grip_fraction_tight applies.
         friction_circle: share grip between cornering and accelerating or
             braking, a_x <= a_x_max * sqrt(1 - (v^2 k / a_lat)^2). Without it
             the profile brakes at a_brake_max right up to a corner it also
@@ -93,6 +103,9 @@ def speed_profile(
                 grown |= np.roll(tight, shift) | np.roll(tight, -shift)
             tight = grown
         lateral[~tight] = max(float(vehicle.a_lat_max) * float(grip_fraction_fast), _EPS)
+    if grip_fraction_tight > 0.0:
+        lateral[kappa * float(tight_radius) > 1.0] = max(
+            float(vehicle.a_lat_max) * float(grip_fraction_tight), _EPS)
 
     # 1. the grip limit. Straight sections have zero curvature and would
     # divide by zero, so they take the ceiling directly.

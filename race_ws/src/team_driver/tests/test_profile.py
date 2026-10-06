@@ -151,3 +151,17 @@ def test_fast_grip_keeps_a_buffer_around_tight_corners():
     far = (s > 45) & (s < 50)
     assert np.allclose(fast[exit_zone], base[exit_zone])
     assert np.all(fast[far] >= base[far] - 1e-9)
+
+
+def test_tight_corner_grip_slows_only_the_tightest_corners():
+    """A 0.8 m hairpin slows down; a 1.5 m corner, beyond tight_radius, does not."""
+    s = np.linspace(0.0, 60.0, 601)
+    kappa = np.where((s > 10) & (s < 13), 1.0 / 0.8, np.where((s > 35) & (s < 38), 1.0 / 1.5, 0.0))
+    v = Vehicle.default()
+    base = speed_profile(kappa, s, v, grip_fraction=1.0, v_max=12.0, total_length=60.1)
+    tight = speed_profile(kappa, s, v, grip_fraction=1.0, v_max=12.0, total_length=60.1,
+                          grip_fraction_tight=0.8, tight_radius=1.0)
+    hairpin = (s > 11) & (s < 12)
+    medium = (s > 36) & (s < 37)
+    assert np.all(tight[hairpin] < base[hairpin] - 0.05)
+    assert np.allclose(tight[medium], base[medium])

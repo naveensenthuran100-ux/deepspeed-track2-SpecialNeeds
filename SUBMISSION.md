@@ -1,9 +1,4 @@
-# Team &lt;name&gt;
-
-> **Status: draft.** Everything marked TO FILL needs the team's own details or
-> a measurement we have not taken yet. Nothing here has run against the real
-> AutoDRIVE simulator: all numbers are from our offline surrogate, against
-> assumed vehicle limits. See "Known issues" before reading any of them.
+# Team &lt;name&gt; — TO FILL
 
 ## Members
 
@@ -15,117 +10,150 @@ TO FILL — 3 to 5 members, roster fixed at submission (rule 3).
 
 ## Approach
 
-A classical racing stack in three tiers. The ROS node
-(`race_ws/src/team_driver/team_driver/driver.py`) is a thin adapter: it
-converts messages, calls one function, publishes two `Float32`s, and never
-raises out of the callback. Everything that decides anything lives in
-`team_driver/core/`, which imports no ROS and is therefore unit-tested in
-milliseconds rather than in six-minute simulator runs. Offline tools in
-`team_driver/tools/` generate the artefacts the driver loads.
+A classical racing stack: **plan offline, track online**. Before the race,
+`team_driver/tools/line_mintime.py` computes a minimum-lap-time racing line
+from the occupancy grid. At start-up the driver turns that line into a speed
+profile from the car's measured limits. During the race, about 40 times a
+second, it finds the car on the line from ground-truth odometry; a speed
+controller sets the throttle and a curvature feed-forward tracker sets the
+steering. Follow-the-gap on the LiDAR is the fallback if the pose is lost,
+stale (> 0.25 s) or more than 1.2 m off the line.
 
-The driver has two modes. **Line mode** follows a minimum-curvature racing
-line against ground-truth pose, at a speed the offline profile computed for
-that point — so it brakes for a corner before the 10 m LiDAR can see it,
-which on a 54 m lap is most of the available lap time. **Gap mode** is
-follow-the-gap with disparity extension, needs nothing but the scan, and
-takes over whenever the line cannot be trusted: no pose, an implausible pose,
-too far off the line, or something sitting on the path ahead. The switch is
-hysteretic, because a mode that flips every frame steers worse than either
-mode alone.
+Why this approach: lap time on this circuit is decided by braking for corners
+the 10 m LiDAR cannot see yet — the car brakes from ~10 m/s to ~2 m/s for the
+two 0.8 m hairpins. Planning the whole lap against the map does that; a
+reactive driver cannot, so it is only the fallback.
 
-What did not work, and why it is worth saying: our first surrogate lap took
-40 seconds with the car in gap mode 92% of the time. The blocked-path check
-was testing line-of-sight to a path point, and on corners of about a metre
-radius the straight chord to a point one braking distance ahead leaves the
-corridor by geometry — so it reported an obstruction at every corner entry on
-a completely clear track. Three further defects came out of the same trace
-(see Known issues). That is what the offline simulator is for.
+The code is in three layers. `driver.py` is a thin ROS 2 adapter with no
+racing logic. `team_driver/core/` holds every decision in pure Python with no
+ROS imports, so it is unit-tested in milliseconds (226 tests). `team_driver/tools/`
+holds the offline generators rule 36 requires.
+
+Components:
+
+- **Racing line** (`tools/line_mintime.py`): a closed periodic spline shifted
+  sideways from the centreline at 90 control points. Each candidate is scored
+  by the lap time of the same speed profile the car drives, and optimised with
+  L-BFGS-B. Penalties enforce wall clearance (half car width + 0.25 m,
+  measured on the distance field of *free* cells, so gaps between ducts count
+  as wall — rule 11), a curvature cap of 1.3 /m, and a curvature-rate cost.
+  53.12 m long. It replaced our first minimum-curvature line
+  (`tools/line_optimise.py`) because it was faster on the real simulator:
+  11.75 s vs 11.96 s mean lap.
+- **Speed profile** (`core/profile.py`): corner limit v = √(a_lat/κ), then a
+  forward pass (acceleration limit) and a backward pass (braking limit), both
+  wrapping round the lap, with a friction circle so turning and braking share
+  grip. Grip has three zones: hairpins (R < 1 m, near full steering lock,
+  where the front tyres hold only ~5 m/s²), normal corners, and open corners
+  (R ≥ 2 m, with a 1.38 m buffer around tighter corners).
+- **Steering** (`core/tracker.py`): δ = atan(L·κ_preview) + k_h·ψ_e +
+  atan(−k_c·e/(v+1)). The curvature feed-forward reads the bend 0.15 s × speed
+  ahead, so the 3.2 rad/s steering actuator gets its lag up front. The error
+  terms are Stanley's. Above 4 m/s the heading gain falls as 4/v, which cut a
+  ~1 Hz weave on the straights by 25%.
+- **MPC** (`core/mpc.py`, `pursuit.tracker: "mpc"`, off): a 1 s horizon
+  (20 × 0.05 s) linearised about the feed-forward steering, with the in-flight
+  command modelled and solved as a small least-squares problem. On the real
+  simulator it tracked the line to ~5 cm but was ~0.3 s a lap slower, so it
+  is kept as an option.
+
+Tuning was done on the **real simulator**, not on our offline model. That model
+(`tools/surrogate.py`) proved 9% optimistic with a rank correlation of only
+0.35 against real runs. The search was a cross-entropy method
+(`lab/real_cem.py`): 10 configurations per generation, the best 3 kept, 15
+parameters searched at once. Each candidate was scored as lap time + 10 s per
+collision. Elites were re-driven every generation so a lucky run could not win,
+and runs where the simulator stuttered were never scored. In total we made 275
+runs on the real simulator.
+
+What did not work: a grip ladder that walked the grip setting up until contact
+reported 5.57 m/s² as the limit — it measured our cautious controller, not the
+tyres; the IMU later showed ~9. Yaw-rate damping reduced the weave but caused
+collisions at hairpin exits. Open-corner grip of 1.5 gave 9 collisions in 3
+runs. Pose extrapolation for latency gave no gain. Iteratively reweighted
+minimum-time lines were slower than plain minimum curvature. A config that
+matched our shipped one for pace (10.68 s) was rejected because only about 1
+run in 4 was clean.
 
 ## How it uses the inputs
 
-- **LiDAR** (`.../lidar`): cleaned, then a safety bubble around the closest
-  return, then disparity extension pulling the far side of every near/far
-  jump in by half a car width. That last step is not optional here — the
-  boundary is a row of separate 33 cm ducts, so beams slip between them and
-  report the far side of the track, and without it a gap follower steers
-  between two ducts, which is both a collision and leaving the course.
-- **Pose** (`.../odom`): the simulator's ground truth, which rule 35 permits
-  and §2.6 recommends. Used for the nearest point on the racing line, the
-  pure-pursuit target, and the speed profile lookup. We have **not** written
-  our own localisation.
-- **Camera / IMU / encoders**: not used. The camera produces no image in a
-  headless run, and speed from `/odom` is already exact.
+- **LiDAR** (`…/lidar`): only for the follow-the-gap fallback — cleaned, then
+  a safety bubble, then disparity extension, so a gap between two ducts never
+  looks like a route. The LiDAR "blocked path" check is disabled
+  (`mode.block_enter_frames: 1000000`): in a solo time trial nothing can block
+  the path, and disabling it changed nothing measurable.
+- **Pose** (`…/odom`): the simulator's **ground truth**, as rules 33 and 35
+  permit, for the position on the line and for the speed and yaw rate. We have
+  not written our own localisation.
+- **IMU**: not used at run time. We used it offline to measure grip (~9 m/s²
+  in normal corners, ~5 at full lock) and braking (7.8–8.8 m/s²).
+- **Camera / encoders**: not used.
 
 ## Speed control
 
-AutoDRIVE takes normalised torque, not a speed, so we wrote the loop.
-Feed-forward from the measured actuator map (`Vehicle.throttle_for_speed`,
-solved in closed form) carries most of the load; a PI trim with a clamped
-integral cleans up the rest. Past a lift band the car coasts rather than
-brakes, because there is no ABS and a locked wheel steers nowhere; past a
-larger band it brakes properly.
-
-Getting the brake authority right mattered more than expected. The speed
-profile plans its braking at `a_brake_max`, and our first controller capped
-real deceleration at about a third of that, so the car arrived at every
-corner too fast and ran wide. The gain and the profile now describe the same
-car.
+AutoDRIVE takes normalised torque, so we wrote the loop
+(`core/speed_controller.py`). The feed-forward is the measured throttle map,
+v ≈ 24.6·u (`tools/sysid.py`). A PI trim follows, with an integral clamped to
+±0.30 that only integrates while unsaturated. More than 0.42 m/s under target
+gives full throttle, unless the lateral load v²κ exceeds 3.74 m/s², which
+prevents power-on understeer on corner exits. Up to 0.13 m/s over target, the
+controller lifts off; beyond that it brakes at 0.96 throttle per m/s of
+excess. There is no ABS, and a locked wheel cannot steer. The target speed is
+read 0.13 s ahead to cover actuation latency. On the real simulator the car
+follows the planned profile closely, within a few tenths of a m/s at the
+corner minima.
 
 ## Results on our own machine
 
-**None yet.** `results/submitted/` is empty: we have not run
-`./scripts/evaluate.sh` against the real simulator. TO FILL before submitting
-— at least one run with `"status": "COMPLETE"` is required (chapter 7).
+`results/submitted/` holds the referee's own files, unedited.
 
-Offline surrogate results, for context only, from a 48-configuration sweep:
+| File | Code | Best lap | 10-lap total | Collisions | Status |
+| --- | --- | --- | --- | --- | --- |
+| `cem480__20260929T081707Z_r1.json` | an **earlier** configuration (29 Sep) | 12.145 s | 124.41 s | 0 | COMPLETE |
+| TO FILL — `evaluate.sh --runs 3` with the submitted code | submitted | | | | |
 
-| | best net lap | collisions | completed |
-| --- | --- | --- | --- |
-| Minimum-curvature racing line, grip 0.30 | 15.42 s | 0 | 12/12 |
-| Shipped centreline, grip 0.40 | 17.10 s | 0 | — |
-
-These are **not** simulator results and must not be read as any kind of
-prediction. See Known issues.
+The 29 September file is from an older configuration and is **not** what we
+submit. It is included so that `results/submitted/` holds at least one
+complete run. The submitted configuration was measured on the same simulator
+with our own test bench (`lab/realsim.py`, one persistent bridge, a referee-style
+reset, the judged format of out lap + warm-up + 10 timed laps, and the shipped
+files with no overrides). Those runs gave 0 collisions in 4 of 4, best laps of
+10.69–10.72 s, and 10-lap totals of 107.9, 108.6, 108.3 and 108.18 s
+(`results/realsim/shipped_H_12lap.*`, `tt_*`). Expect the judged run to be
+close to those numbers, not to the 29 September file.
 
 ### The machine that produced them
 
 | CPU | GPU | RAM | OS | Typical real-time factor |
 | --- | --- | --- | --- | --- |
-| Apple M3 Pro (arm64) | — (no CUDA) | 18 GB | macOS | TO FILL |
+| Apple M3 Pro (arm64) | integrated | 18 GB | macOS | 1.0 (1.007 in the submitted file) |
 
-Note for the judges: we develop on Apple Silicon, where the Linux simulator
-binary cannot run. Locally the native macOS simulator runs on the host with
-the devkit in the container (`evaluate.sh --no-simulator`), so **we never
-execute the judged code path on our own machines**. The GitHub Actions Judge
-workflow is our only access to x86 Linux, and we lean on it as a correctness
-gate rather than for its times.
+We develop on Apple Silicon, where the Linux simulator binary cannot run. We
+use the native macOS simulator on the host with the devkit in the official
+container (`evaluate.sh --no-simulator`).
+
+macOS throttles the simulator ("App Nap") when its window is not frontmost or
+the display sleeps. Odometry gaps then grow from ~20 ms to 100–370 ms and the
+driver tracks worse. Our test bench flags such runs and discards them. A
+judging machine that keeps up in real time should not see this.
 
 ## Anything precomputed
 
 | Artefact | Produced by | Regenerate with |
 | --- | --- | --- |
-| `maps/icra26_compete_raceline.csv` | `team_driver/tools/line_optimise.py` | `python3 -m team_driver.tools.build_raceline --map maps/icra26_compete --centreline maps/icra26_compete_centerline.csv --out maps/icra26_compete_raceline.csv --margin 0.45` |
-| `config/vehicle.json` | `team_driver/tools/sysid.py` | `ros2 run team_driver sysid_drive`, then `python3 -m team_driver.tools.sysid --log results/sysid.csv --out race_ws/src/team_driver/config/vehicle.json` |
+| `maps/icra26_compete_raceline.csv` | `tools/build_raceline.py` (minimum-curvature start), then `tools/line_mintime.py` | From `race_ws/src/team_driver`: `python3 -m team_driver.tools.build_raceline --map ../../../maps/icra26_compete --centreline ../../../maps/icra26_compete_centerline.csv --margin 0.30 --out /tmp/m0300.csv`, then `python3 -m team_driver.tools.line_mintime --start /tmp/m0300.csv --kappa-max 1.3 --a-lat 8.0 --margin 0.25 --out ../../../maps/icra26_compete_raceline.csv`. Re-run on 15 Oct: the first step matches exactly, and the result matches the shipped line to within 1.8 cm (about 10 s on a laptop). |
+| `config/vehicle.json` throttle map | `team_driver/tools/sysid.py` | `python3 -m team_driver.tools.sysid --log lab/data/sysid_2026-09-24.csv --map-only --base config/vehicle.json --out config/vehicle.json` |
+| `config/vehicle.json` `a_brake_max` 8.5 | IMU braking on real runs (7.8–8.8 m/s²) | `lab/physics.py` |
+| `config/driver_params.yaml` values | the real-simulator search | `lab/real_cem.py`, then `lab/finalize.py` |
 
-The racing line is a bounded linear least-squares solve for the lateral
-offsets that minimise total squared curvature, subject to the measured free
-distance to the boundary either side less a margin — the standard
-minimum-curvature formulation (Heilmeier et al. 2019). No waypoint in it was
-placed by hand.
-
-The speed profile is **not** shipped as an artefact: it is computed at
-startup from the line and `vehicle.json`, so changing the identified grip
-changes the profile with it instead of leaving a stale file describing a car
-we no longer believe in.
-
-No trained weights. We have no learned components.
+No waypoint was placed by hand. The speed profile is not shipped: it is
+computed at start-up from the line and `vehicle.json`, so it can never
+describe a car we no longer believe in. No trained weights.
 
 ## Dependencies we added
 
-**None.** `requirements.txt` and `apt-packages.txt` are empty of real
-entries. numpy, scipy, PyYAML, OpenCV and Pillow are already in the image,
-and `requirements.txt` warns against replacing numpy or transforms3d, so
-shipping nothing removes the largest silent failure mode in the competition.
+**None.** `requirements.txt` and `apt-packages.txt` declare nothing. numpy,
+scipy and PyYAML are already in the image.
 
 | Package | pip or apt | What we use it for |
 | --- | --- | --- |
@@ -135,44 +163,41 @@ shipping nothing removes the largest silent failure mode in the competition.
 
 No third-party code. Ideas from:
 
-- Sezer & Gokasan, *A novel obstacle avoidance algorithm: "Follow the Gap
-  Method"* (2012) — the gap follower.
-- Otterness, *The "disparity extender" algorithm* (2019) — disparity extension.
-- Coulter, *Implementation of the Pure Pursuit Path Tracking Algorithm*,
-  CMU-RI-TR-92-01 — the tracker.
 - Heilmeier et al., *Minimum curvature trajectory planning and control for an
-  autonomous race car* (2019) — the racing line formulation.
+  autonomous race car* (2019) — the first racing line and the friction circle.
+- Thrun et al., *Stanley: The robot that won the DARPA Grand Challenge* (2006)
+  — the heading and cross-track terms of the tracker.
+- Coulter, *Implementation of the Pure Pursuit Path Tracking Algorithm*,
+  CMU-RI-TR-92-01 — the alternative tracker.
+- Sezer & Gokasan, *A novel obstacle avoidance algorithm: "Follow the Gap
+  Method"* (2012), and Otterness, *The "disparity extender" algorithm* (2019)
+  — the fallback.
+- Rubinstein & Kroese, *The Cross-Entropy Method* (2004) — the parameter search.
 
 ## AI assistance
 
-Claude (Anthropic) was used throughout: to read the track guides, design the
-architecture, and write the code and its tests. The design decisions, the
-rulings taken along the way, and the defects found are recorded in
-`docs/superpowers/specs/`, `docs/superpowers/plans/` and the git history —
-every commit message states what changed and why.
+Claude (Anthropic) was used throughout: to read the guides, design the
+architecture, write code and tests, and run and analyse the experiments on the
+real simulator. The design decisions, measurements and negative results are
+recorded in `docs/HANDOVER.md`, `docs/superpowers/` and the commit messages.
 
-TO FILL — each member should add what they personally worked on and can
-explain, since any member may be asked about any part (rule 41).
+TO FILL — each member: what they personally worked on and can explain
+(rule 41).
 
 ## Known issues
 
-1. **Nothing has run on the real simulator.** Every number in this document
-   comes from our own offline surrogate. It is a model and it can lie; the
-   surrogate-versus-simulator correlation that would tell us how far to trust
-   it has not been measured. `lab/report.py --surrogate` computes it.
-2. **`config/vehicle.json` has `measured: false`.** Its grip, braking and
-   coast limits are derived from the published vehicle specification, not
-   measured from the car, and the driver logs a warning about this on
-   startup. `ros2 run team_driver sysid_drive` is the first thing to run.
-3. **Tracking accuracy is the binding constraint, not speed.** Above about
-   grip fraction 0.35 the car can corner that fast but cannot *track* the
-   line there: the 3.2 rad/s steering rate limit costs roughly 0.8 m of
-   travel to reach lock at 5 m/s on a 1.1 m radius corner, so it runs wide
-   and leaves the circuit. In the sweep, grip 0.30 and 0.35 completed 24/24
-   while 0.40 completed 4/12 and 0.45 completed 0/12. Adding curvature
-   feed-forward to the steering — turning into the corner immediately rather
-   than waiting for cross-track error to build — is the single biggest
-   lap-time item left, and would unlock the racing line's remaining margin.
-4. **No own localisation.** We use the simulator's ground-truth pose, which
-   the rules permit. A particle filter against our own grid is the obvious
-   next piece.
+1. **The hairpin exits are the margin.** At the 0.8 m hairpins the steering
+   is near full lock and the tyres hold ~5 m/s². Every collision we saw with
+   faster settings was there, mostly at the exit of the second hairpin.
+   `line.grip_fraction_tight` 0.90 is what keeps the car clean.
+2. **Ground-truth pose dependency.** Without `/odom` the car falls back to
+   follow-the-gap, which completes laps but is far slower. Own localisation (a
+   particle filter against our grid) is the obvious next piece.
+3. **Real-time sensitivity.** The tuning assumes odometry at ~20–40 ms. A
+   judging machine running well below real time would add effective latency.
+4. **`a_lat_max` in `vehicle.json` (5.57) is a historical lower bound.** The
+   grip fractions multiply it, so some fractions are above 1.0. The effective
+   grips (5.0 / 6.2 / 7.8 m/s²) are below the measured ~9.
+5. Next with more time: re-optimise the line with the three-zone grip built
+   in, tune the MPC for pace rather than precision, and build our own
+   localisation.

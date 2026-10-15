@@ -1,0 +1,128 @@
+{
+  "schema_version": 3,
+  "referee_version": "2.0.0",
+  "track_variant": "track2",
+  "simulator": "autodrive",
+  "team": "cem480",
+  "run_id": "20260929T081707Z_r1",
+  "track": "icra26_compete",
+  "map_path": "/hackathon/maps/icra26_compete",
+  "finished_at_utc": "2026-09-29T08:19:47+00:00",
+  "simulator_best_lap_time": 12.1453,
+  "environment": {
+    "real_time_factor": 1.007,
+    "wall_duration_s": 156.0,
+    "callback_errors": 0
+  },
+  "status": "COMPLETE",
+  "reason": "all timed laps completed",
+  "scored": true,
+  "rules": {
+    "warmup_laps": 2,
+    "timed_laps": 10,
+    "collision_penalty_s": 10.0,
+    "max_collisions": 10,
+    "min_lap_time_s": 1.0,
+    "session_timeout_s": 900.0,
+    "stuck_speed_mps": 0.05,
+    "stuck_timeout_s": 15.0
+  },
+  "laps_completed": 10,
+  "laps_required": 10,
+  "collisions": 0,
+  "collision_limit": 10,
+  "best_lap_time": 12.1453,
+  "best_lap_time_raw": 12.1453,
+  "best_lap_number": 4,
+  "fastest_raw_lap_time": 12.1453,
+  "fastest_raw_lap_number": 4,
+  "total_time": 124.4102,
+  "total_time_raw": 124.4102,
+  "total_penalty_s": 0.0,
+  "race_time_s": 150.3323,
+  "warnings": [],
+  "laps": [
+    {
+      "number": 1,
+      "raw_time": 13.1097,
+      "collisions": 0,
+      "penalty_s": 0.0,
+      "net_time": 13.1097
+    },
+    {
+      "number": 2,
+      "raw_time": 12.6105,
+      "collisions": 0,
+      "penalty_s": 0.0,
+      "net_time": 12.6105
+    },
+    {
+      "number": 3,
+      "raw_time": 12.3874,
+      "collisions": 0,
+      "penalty_s": 0.0,
+      "net_time": 12.3874
+    },
+    {
+      "number": 4,
+      "raw_time": 12.1453,
+      "collisions": 0,
+      "penalty_s": 0.0,
+      "net_time": 12.1453
+    },
+    {
+      "number": 5,
+      "raw_time": 12.1693,
+      "collisions": 0,
+      "penalty_s": 0.0,
+      "net_time": 12.1693
+    },
+    {
+      "number": 6,
+      "raw_time": 12.2773,
+      "collisions": 0,
+      "penalty_s": 0.0,
+      "net_time": 12.2773
+    },
+    {
+      "number": 7,
+      "raw_time": 12.3674,
+      "collisions": 0,
+      "penalty_s": 0.0,
+      "net_time": 12.3674
+    },
+    {
+      "number": 8,
+      "raw_time": 12.6445,
+      "collisions": 0,
+      "penalty_s": 0.0,
+      "net_time": 12.6445
+    },
+    {
+      "number": 9,
+      "raw_time": 12.3714,
+      "collisions": 0,
+      "penalty_s": 0.0,
+      "net_time": 12.3714
+    },
+    {
+      "number": 10,
+      "raw_time": 12.3274,
+      "collisions": 0,
+      "penalty_s": 0.0,
+      "net_time": 12.3274
+    }
+  ],
+  "warmup_laps": [
+    {
+      "number": 1,
+      "raw_time": 13.2287,
+      "collisions": 0
+    },
+    {
+      "number": 2,
+      "raw_time": 12.4414,
+      "collisions": 0
+    }
+  ]
+}

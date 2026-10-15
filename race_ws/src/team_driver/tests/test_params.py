@@ -103,7 +103,7 @@ def test_every_shipped_value_has_the_type_the_driver_declares():
     shipped = yaml.safe_load((root / "config" / "driver_params.yaml").read_text())
     declared = {name: default for group in ALL_GROUPS for name, (_, default) in group.items()}
     source = (root / "team_driver" / "driver.py").read_text()
-    for name, default in re.findall(r'declare_parameter\("([^"]+)",\s*([^)]+)\)', source):
+    for name, default in re.findall(r'\bdeclare(?:_parameter)?\("([^"]+)",\s*([^)]+)\)', source):
         declared[name] = ast.literal_eval(default)
 
     def flatten(d, pre=""):

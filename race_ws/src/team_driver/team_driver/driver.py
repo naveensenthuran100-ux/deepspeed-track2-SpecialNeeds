@@ -27,6 +27,7 @@ import time
 
 import numpy as np
 import rclpy
+import yaml
 from geometry_msgs.msg import Point
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
@@ -69,32 +70,91 @@ def devkit_qos() -> QoSProfile:
     )
 
 
+def shipped_parameters():
+    """The tuned values in config/driver_params.yaml, flattened to ROS names.
+
+    The judged run starts the node with a bare `ros2 run team_driver driver`:
+    evaluate.launch.py passes no params file unless --driver-params is given.
+    Without this the node would race on the fallback literals in
+    Driver.__init__ rather than the tuned configuration - measured on
+    2026-10-15, ~13 s laps instead of ~10.7 s. A params file passed explicitly
+    still wins, because ROS applies overrides on top of declared defaults.
+
+    Returns ({name: value}, path), or ({}, None) if no file can be read.
+    """
+    candidates = []
+    try:
+        from ament_index_python.packages import get_package_share_directory
+
+        candidates.append(os.path.join(
+            get_package_share_directory("team_driver"), "config", "driver_params.yaml"))
+    except Exception:
+        pass
+    candidates.append(os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "config", "driver_params.yaml"))
+
+    for path in candidates:
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path) as handle:
+                tree = yaml.safe_load(handle)["driver"]["ros__parameters"]
+        except Exception:
+            continue
+        flat = {}
+
+        def walk(node, prefix):
+            for key, value in node.items():
+                if isinstance(value, dict):
+                    walk(value, f"{prefix}{key}.")
+                else:
+                    flat[f"{prefix}{key}"] = value
+
+        walk(tree, "")
+        return flat, path
+    return {}, None
+
+
 class Driver(Node):
 
     def __init__(self):
         super().__init__("driver")
 
-        self.declare_parameter("vehicle_ns", "/autodrive/roboracer_1")
-        self.declare_parameter("vehicle_config", "")
-        self.declare_parameter("line.raceline_csv", "")
-        self.declare_parameter("line.grip_fraction", 0.70)
-        self.declare_parameter("line.v_max", 12.0)
-        self.declare_parameter("line.friction_circle", False)
-        self.declare_parameter("line.grip_fraction_fast", 0.0)
-        self.declare_parameter("line.fast_radius", 2.0)
-        self.declare_parameter("line.fast_buffer_m", 1.0)
-        self.declare_parameter("line.grip_fraction_tight", 0.0)
-        self.declare_parameter("line.tight_radius", 1.0)
+        # Every declared default comes from the shipped config/driver_params.yaml
+        # when it can be read; the literals below are only the fallback.
+        shipped, shipped_path = shipped_parameters()
+
+        def declare(name, fallback):
+            self.declare_parameter(name, shipped.get(name, fallback))
+
+        declare("vehicle_ns", "/autodrive/roboracer_1")
+        declare("vehicle_config", "")
+        declare("line.raceline_csv", "")
+        declare("line.grip_fraction", 0.70)
+        declare("line.v_max", 12.0)
+        declare("line.friction_circle", False)
+        declare("line.grip_fraction_fast", 0.0)
+        declare("line.fast_radius", 2.0)
+        declare("line.fast_buffer_m", 1.0)
+        declare("line.grip_fraction_tight", 0.0)
+        declare("line.tight_radius", 1.0)
         # How old the pose may be before we stop believing it, in simulated
         # seconds. Ten frames at 40 Hz.
-        self.declare_parameter("pose_timeout_s", 0.25)
+        declare("pose_timeout_s", 0.25)
         # Latency compensation (core/latency.py). Off by default: when on, the
         # pose is projected forward by its age at the scan plus latency_s.
-        self.declare_parameter("pose.extrapolate", False)
-        self.declare_parameter("pose.latency_s", 0.0)
+        declare("pose.extrapolate", False)
+        declare("pose.latency_s", 0.0)
         for group in ALL_GROUPS:
             for name, (_, default) in group.items():
-                self.declare_parameter(name, default)
+                declare(name, default)
+
+        if shipped_path:
+            self.get_logger().info(f"defaults from {shipped_path}")
+        else:
+            self.get_logger().warn(
+                "config/driver_params.yaml not found - racing on the fallback defaults")
 
         vehicle = self._load_vehicle()
         config = build_configs({

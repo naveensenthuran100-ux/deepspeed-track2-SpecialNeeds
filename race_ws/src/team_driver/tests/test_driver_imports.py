@@ -11,6 +11,7 @@ Importing is not enough; these tests build a Driver. Stubbing ROS is cheap
 and catches the whole class: undefined names, a parameter list drifted from
 core/params.py, and a racing line that fails to load.
 """
+import os
 import pathlib
 import sys
 import types
@@ -275,3 +276,32 @@ def test_pose_freshness_survives_the_clock_going_backwards(driver_module):
     node.position, node.yaw = (1.0, 2.0), 0.5
     node._pose_stamp = 100.0
     assert node._pose_if_fresh(1.0) == (None, None)
+
+
+def test_bare_node_races_on_the_shipped_config(driver_module):
+    # The judged run is a bare `ros2 run team_driver driver` with no params
+    # file, so the tuned values must arrive as declared defaults. Measured on
+    # 2026-10-15: without this the official run lapped ~13 s instead of ~10.7.
+    import yaml
+
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "config", "driver_params.yaml")
+    with open(path) as handle:
+        tuned = yaml.safe_load(handle)["driver"]["ros__parameters"]
+
+    _FakeNode.overrides = {}
+    node = driver_module.Driver()
+    assert node._parameters["line.grip_fraction"] == tuned["line"]["grip_fraction"]
+    assert node._parameters["line.grip_fraction_tight"] == tuned["line"]["grip_fraction_tight"]
+    assert node._parameters["speed.full_throttle_band"] == tuned["speed"]["full_throttle_band"]
+    assert node._parameters["pursuit.heading_speed_ref"] == tuned["pursuit"]["heading_speed_ref"]
+    assert node._parameters["mode.block_enter_frames"] == tuned["mode"]["block_enter_frames"]
+
+
+def test_an_explicit_override_still_wins(driver_module):
+    _FakeNode.overrides = {"line.grip_fraction": 0.5}
+    try:
+        node = driver_module.Driver()
+        assert node._parameters["line.grip_fraction"] == 0.5
+    finally:
+        _FakeNode.overrides = {}

@@ -1,12 +1,12 @@
-# Team &lt;name&gt; — TO FILL
+# Team SpecialNeeds
 
 ## Members
 
-TO FILL — 3 to 5 members, roster fixed at submission (rule 3).
-
 | Name | Matric number | Email |
 | --- | --- | --- |
-| ... | ... | ... |
+| Naveen | TO FILL | TO FILL |
+| Sachin | TO FILL | TO FILL |
+| Yukesh | TO FILL | TO FILL |
 
 ## Approach
 
@@ -105,22 +105,27 @@ corner minima.
 
 ## Results on our own machine
 
-`results/submitted/` holds the referee's own files, unedited.
+`results/submitted/` holds the referee's own file, unedited, from
+`./scripts/evaluate.sh --team SpecialNeeds --no-simulator` with the submitted
+code and no `--driver-params`, which is exactly how it is judged.
 
-| File | Code | Best lap | 10-lap total | Collisions | Status |
+| File | Best lap | 10-lap total | Collisions | Status | Real-time factor |
 | --- | --- | --- | --- | --- | --- |
-| `cem480__20260929T081707Z_r1.json` | an **earlier** configuration (29 Sep) | 12.145 s | 124.41 s | 0 | COMPLETE |
-| TO FILL — `evaluate.sh --runs 3` with the submitted code | submitted | | | | |
+| `SpecialNeeds__20261015T171039Z.json` | **10.687 s** | **107.84 s** | 0 | COMPLETE | 1.008 |
 
-The 29 September file is from an older configuration and is **not** what we
-submit. It is included so that `results/submitted/` holds at least one
-complete run. The submitted configuration was measured on the same simulator
-with our own test bench (`lab/realsim.py`, one persistent bridge, a referee-style
-reset, the judged format of out lap + warm-up + 10 timed laps, and the shipped
-files with no overrides). Those runs gave 0 collisions in 4 of 4, best laps of
-10.69–10.72 s, and 10-lap totals of 107.9, 108.6, 108.3 and 108.18 s
-(`results/realsim/shipped_H_12lap.*`, `tt_*`). Expect the judged run to be
-close to those numbers, not to the 29 September file.
+Timed laps were 10.69–10.97 s. This matches our own test bench on the same
+code: 0 collisions in 4 of 4 runs, best laps 10.69–10.72 s, totals
+107.9–108.6 s.
+
+**A bug the official script found, now fixed.** `evaluate.launch.py` starts
+the driver with no params file unless `--driver-params` is given, so the node
+raced on the fallback literals in `driver.py` instead of the tuned
+`config/driver_params.yaml`. Two official runs on 15 Oct were ~13 s a lap for
+that reason (`results/SpecialNeeds__20261015T165827Z.json`,
+`…170337Z.json`, not submitted). The driver now loads its shipped
+`driver_params.yaml` as its declared defaults (`shipped_parameters()` in
+`driver.py`). A params file passed explicitly still overrides it, and
+`tests/test_driver_imports.py` checks both cases.
 
 ### The machine that produced them
 

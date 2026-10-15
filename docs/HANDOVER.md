@@ -11,6 +11,38 @@ as an assumption. Read §4 before trusting any number.
 
 ## 0. Read this first — the overnight session of 2026-10-02/03
 
+### Update 2026-10-16 — official run, a judged-path bug, and the exit gate re-tested
+
+- **Bug found by the official script, fixed (7a10a9e):** `evaluate.launch.py`
+  starts the driver with no params file, so it raced on the fallback literals
+  in `driver.py` (~13 s laps, 2–9 collisions). The driver now declares the
+  shipped `driver_params.yaml` values as its defaults. Official run after the
+  fix: **10.687 s / 107.84 s, 0 collisions** (`results/submitted/`).
+- **Exit full-throttle gate re-tested** (`lab/exit_gate_test.sh`,
+  `results/realsim/eg_round*.log`): 0.7 s/lap is spent > 0.42 m/s under target
+  with full throttle suppressed on exits, so `speed.full_throttle_max_lat`
+  3.74 looked stale. Real sim, 12-lap runs, interleaved:
+
+  | gate (m/s²) | runs | collisions/run | mean flying lap |
+  |---|---|---|---|
+  | **3.74 (shipped)** | 3 | **0.7** | **10.92 s** |
+  | 5.0 | 4 | 2.0 | 11.06 s |
+  | 6.5 | 3 | 2.3 | 11.04 s |
+  | 12 (off) | 3 | 1.7 | 11.07 s |
+
+  Looser gates give slightly better single laps (10.58–10.63 vs 10.66) but
+  more collisions and slower averages: the exits are grip-limited, the
+  "under target" time is not recoverable. Shipped value stays.
+- Also measured: full-throttle acceleration is 4.5 m/s² at 2–6 m/s falling to
+  3.0 at 8–10 m/s (vehicle.json says 6.25; harmless, the car is flat out
+  there anyway). Wider hairpin lines (R ≥ 1 m) re-optimised with the
+  three-zone grip model: 0.4–0.5 s slower in the model.
+- **Simulator window size matters on the Mac.** Full Retina (3024×1898):
+  render-bound, odometry ~40 ms. Small (960×540): the bridge saturates a core,
+  ~12 ms median but 50–70 stalls >100 ms per run. 1920×1080 windowed
+  (`-screen-fullscreen 0 -screen-width 1920 -screen-height 1080`) is the
+  usable middle (~20 ms). The Mac in use (Claude app, Telegram) adds stalls.
+
 ### Update 2026-10-07 — shipped: braking 8.5 + tight-corner grip (config "H")
 
 Real simulator, judged format, shipped files: **0 collisions in 4 of 4 runs**,

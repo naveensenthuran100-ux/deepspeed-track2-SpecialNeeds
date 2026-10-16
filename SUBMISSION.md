@@ -209,14 +209,14 @@ What each member did (rule 41):
   real-simulator tuning sessions, adjusting parameters run by run (grip,
   braking, throttle, racing-line changes) and judging each change from lap
   times and collisions. Chose between configurations (the always-clean setup
-  over the faster crash-prone one), ran the official runs, and caught the slow
-  official run that exposed the settings-file bug.
+  over the faster crash-prone one).
 - **Sachin**: worked on racing-line optimisation and on finding the limits of
   the car in the early (Gemini) phase; now testing the runs and tracking down
-  bugs.
+  bugs. Implemented tried-and-tested ideas from overseas teams in our methods.
 - **Yukesh**: worked on racing-line optimisation and on finding the limits of
-  the car in the early (Gemini) phase; now testing the runs and tracking down
-  bugs.
+  the car in the early (Gemini) phase;  ran the official runs, and caught the slow
+  official run that exposed the settings-file bug. Researched world record
+  timings and how they achieved it.
 
 ## Known issues
 

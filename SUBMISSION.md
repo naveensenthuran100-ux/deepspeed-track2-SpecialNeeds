@@ -4,9 +4,9 @@
 
 | Name | Matric number | Email |
 | --- | --- | --- |
-| Naveen | TO FILL | TO FILL |
-| Sachin | TO FILL | TO FILL |
-| Yukesh | TO FILL | TO FILL |
+| Naveen | U2522436E | naveense001@e.ntu.edu.sg |
+| Sachin | U2522745C | Alag0005@e.ntu.edu.sg |
+| Yukesh | U2522453F | yukesh001@e.ntu.edu.sg |
 
 ## Approach
 
@@ -26,7 +26,7 @@ reactive driver cannot, so it is only the fallback.
 
 The code is in three layers. `driver.py` is a thin ROS 2 adapter with no
 racing logic. `team_driver/core/` holds every decision in pure Python with no
-ROS imports, so it is unit-tested in milliseconds (226 tests). `team_driver/tools/`
+ROS imports, so it is unit-tested in milliseconds (228 tests). `team_driver/tools/`
 holds the offline generators rule 36 requires.
 
 Components:
@@ -57,14 +57,21 @@ Components:
   simulator it tracked the line to ~5 cm but was ~0.3 s a lap slower, so it
   is kept as an option.
 
-Tuning was done on the **real simulator**, not on our offline model. That model
-(`tools/surrogate.py`) proved 9% optimistic with a rank correlation of only
-0.35 against real runs. The search was a cross-entropy method
+Tuning was done on the **real simulator**, not on our offline model. We first
+tried a Monte Carlo search on that model (`lab/montecarlo.py`). It sampled
+random configurations, scored each over randomised "worlds" (grip error, sensor
+noise, latency, start jitter), and ranked them by expected best-of-three lap
+time including collision penalties. We dropped it for two reasons. The model it
+searched (`tools/surrogate.py`) proved 9% optimistic with a rank correlation of
+only 0.35 against real runs, so its rankings could not be trusted. And pure
+random sampling wastes evaluations: affordable at 0.25 s a lap offline, but not
+at about a minute per run on the real simulator. The search we kept was a
+cross-entropy method
 (`lab/real_cem.py`): 10 configurations per generation, the best 3 kept, 15
 parameters searched at once. Each candidate was scored as lap time + 10 s per
 collision. Elites were re-driven every generation so a lucky run could not win,
-and runs where the simulator stuttered were never scored. In total we made 275
-runs on the real simulator.
+and runs where the simulator stuttered were never scored. In total we recorded
+286 test-bench runs on the real simulator, plus the official runs.
 
 What did not work: a grip ladder that walked the grip setting up until contact
 reported 5.57 m/s² as the limit — it measured our cautious controller, not the
@@ -73,7 +80,12 @@ collisions at hairpin exits. Open-corner grip of 1.5 gave 9 collisions in 3
 runs. Pose extrapolation for latency gave no gain. Iteratively reweighted
 minimum-time lines were slower than plain minimum curvature. A config that
 matched our shipped one for pace (10.68 s) was rejected because only about 1
-run in 4 was clean.
+run in 4 was clean. On 16 Oct we re-tested two assumptions on the real
+simulator. Allowing full throttle earlier on corner exits (5.0, 6.5 or no
+limit, against the shipped 3.74 m/s²) gave 1.7–2.3 collisions per 12-lap run
+against 0.7, and slower averages (11.04–11.07 s against 10.92 s). Wider hairpin
+lines (radius ≥ 1 m) were 0.4–0.5 s a lap slower in the model. Neither was
+adopted.
 
 ## How it uses the inputs
 
@@ -121,8 +133,8 @@ code: 0 collisions in 4 of 4 runs, best laps 10.69–10.72 s, totals
 the driver with no params file unless `--driver-params` is given, so the node
 raced on the fallback literals in `driver.py` instead of the tuned
 `config/driver_params.yaml`. Two official runs on 15 Oct were ~13 s a lap for
-that reason (`results/SpecialNeeds__20261015T165827Z.json`,
-`…170337Z.json`, not submitted). The driver now loads its shipped
+that reason (`results/SpecialNeeds__20261015T165827Z.json` and
+`…170337Z.json`, kept locally and not submitted). The driver now loads its shipped
 `driver_params.yaml` as its declared defaults (`shipped_parameters()` in
 `driver.py`). A params file passed explicitly still overrides it, and
 `tests/test_driver_imports.py` checks both cases.
@@ -131,7 +143,7 @@ that reason (`results/SpecialNeeds__20261015T165827Z.json`,
 
 | CPU | GPU | RAM | OS | Typical real-time factor |
 | --- | --- | --- | --- | --- |
-| Apple M3 Pro (arm64) | integrated | 18 GB | macOS | 1.0 (1.007 in the submitted file) |
+| Apple M3 Pro (arm64) | integrated | 18 GB | macOS | 1.0 (1.008 in the submitted file) |
 
 We develop on Apple Silicon, where the Linux simulator binary cannot run. We
 use the native macOS simulator on the host with the devkit in the official
@@ -181,28 +193,50 @@ No third-party code. Ideas from:
 
 ## AI assistance
 
-Claude (Anthropic) was used throughout: to read the guides, design the
-architecture, write code and tests, and run and analyse the experiments on the
-real simulator. The design decisions, measurements and negative results are
-recorded in `docs/HANDOVER.md`, `docs/superpowers/` and the commit messages.
+Two assistants, one after the other:
 
-TO FILL — each member: what they personally worked on and can explain
-(rule 41).
+- **Gemini (Google Antigravity)**, early on, by all three of us: first
+  experiments with racing-line optimisation and with finding the car's limits.
+- **Claude (Anthropic)** for the stack we submit: to read the guides, design
+  the architecture, write the code and tests, and run and analyse the
+  experiments on the real simulator. The design decisions, measurements and
+  negative results are recorded in `docs/HANDOVER.md`, `docs/superpowers/` and
+  the commit messages.
+
+What each member did (rule 41):
+
+- **Naveen**: led the project and directed the work with Claude. Ran the
+  real-simulator tuning sessions, adjusting parameters run by run (grip,
+  braking, throttle, racing-line changes) and judging each change from lap
+  times and collisions. Chose between configurations (the always-clean setup
+  over the faster crash-prone one), ran the official runs, and caught the slow
+  official run that exposed the settings-file bug.
+- **Sachin**: worked on racing-line optimisation and on finding the limits of
+  the car in the early (Gemini) phase; now testing the runs and tracking down
+  bugs.
+- **Yukesh**: worked on racing-line optimisation and on finding the limits of
+  the car in the early (Gemini) phase; now testing the runs and tracking down
+  bugs.
 
 ## Known issues
 
 1. **The hairpin exits are the margin.** At the 0.8 m hairpins the steering
-   is near full lock and the tyres hold ~5 m/s². Every collision we saw with
-   faster settings was there, mostly at the exit of the second hairpin.
+   is near full lock and the tyres hold ~5 m/s². In an 18-run test of faster
+   settings, 73% of all collisions were at the exit of the second hairpin.
    `line.grip_fraction_tight` 0.90 is what keeps the car clean.
 2. **Ground-truth pose dependency.** Without `/odom` the car falls back to
-   follow-the-gap, which completes laps but is far slower. Own localisation (a
+   follow-the-gap, which is far slower; we have not timed that fallback on the
+   real simulator. Own localisation (a
    particle filter against our grid) is the obvious next piece.
 3. **Real-time sensitivity.** The tuning assumes odometry at ~20–40 ms. A
    judging machine running well below real time would add effective latency.
 4. **`a_lat_max` in `vehicle.json` (5.57) is a historical lower bound.** The
    grip fractions multiply it, so some fractions are above 1.0. The effective
    grips (5.0 / 6.2 / 7.8 m/s²) are below the measured ~9.
+   `a_accel_max` (6.25) is optimistic too: measured at full throttle the car
+   gives 4.5 m/s² at low speed and 3.0 at 8–10 m/s. It doesn't change what the
+   car does, because it is already at full throttle wherever it is below target,
+   so we left the shipped file alone.
 5. Next with more time: re-optimise the line with the three-zone grip built
    in, tune the MPC for pace rather than precision, and build our own
    localisation.
